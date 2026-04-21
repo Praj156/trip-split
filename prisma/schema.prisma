@@ -5,11 +5,11 @@
 
 generator client {
   provider = "prisma-client-js"
+  output   = "../generated/client"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -29,25 +29,18 @@ model Trip {
 }
 
 model Member {
-  id          String   @id @default(cuid())
-  name        String
-  totalSpent  Float    @default(0) // Added in Step 2
-  tripId      String
-  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  
-  // This tracks whose expenses this member is participating in
-  shares      Split[]  
-  
-  // This tracks the expense this member paid for
-  payments    Split[]  @relation("PayerRelation")
+  id        String    @id @default(cuid())
+  name      String
+  tripId    String
+  trip      Trip      @relation(fields: [tripId], references: [id])
+  expenses  Expense[] // A member can have multiple expense entries
 }
 
-model Split {
-  id               String @id @default(cuid())
-  payerMemberId    String // The member who spent the money
-  receiverMemberId String // The member who "benefits" from the money
-  amount           Float  // The calculated portion (TotalSpent / Count of Selected Names)
-  
-  payer            Member @relation("PayerRelation", fields: [payerMemberId], references: [id])
-  receiver         Member @relation(fields: [receiverMemberId], references: [id])
+model Expense {
+  id            String   @id @default(cuid())
+  amount        Float
+  description   String?  // e.g., "Dinner" or "Activity"
+  sharedWithIds String[] // The IDs of members sharing this specific amount
+  memberId      String
+  member        Member   @relation(fields: [memberId], references: [id])
 }

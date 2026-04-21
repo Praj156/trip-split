@@ -1,0 +1,46 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id    String @id @default(cuid())
+  email String @unique
+  trips Trip[]
+}
+
+model Trip {
+  id        String   @id @default(cuid())
+  name      String
+  startDate DateTime
+  endDate   DateTime
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  members   Member[]
+}
+
+model Member {
+  id       String    @id @default(cuid())
+  name     String
+  tripId   String
+  trip     Trip      @relation(fields: [tripId], references: [id])
+  expenses Expense[] // A member can have multiple expense entries
+}
+
+model Expense {
+  id            String   @id @default(cuid())
+  amount        Float
+  description   String? // e.g., "Dinner" or "Activity"
+  sharedWithIds String[] // The IDs of members sharing this specific amount
+  memberId      String
+  member        Member   @relation(fields: [memberId], references: [id])
+}
