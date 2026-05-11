@@ -1,92 +1,119 @@
 import { checkUser } from '../actions/user';
 import { db } from '@/lib/db';
 import Link from 'next/link';
-import { UserButton } from '@clerk/nextjs';
+import { redirect } from 'next/navigation';
 
 export default async function DashboardPage() {
-  // 1. Trigger database sync/check
   const user = await checkUser();
+  if (!user) redirect('/sign-in');
 
-  // 2. Fetch user's trips from Prisma
   const trips = await db.trip.findMany({
-    where: {
-      userId: user?.id,
-    }
+    where: { userId: user.id },
+    orderBy: { startDate: 'desc' },
+    include: {
+      members: true,
+      _count: { select: { members: true } },
+    },
   });
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      {/* DASHBOARD HEADER */}
-      <nav className="bg-white border-b border-slate-200 px-8 py-4 flex justify-between items-center sticky top-0 z-30">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-black">
-            T
-          </div>
-          <h1 className="text-lg font-bold text-slate-900 tracking-tight">Dashboard</h1>
-        </div>
-        <div className="flex items-center gap-4">
-          <UserButton />
-        </div>
-      </nav>
+    <div className="max-w-4xl mx-auto px-6 py-8">
 
-      <main className="max-w-5xl mx-auto px-6 py-10">
-        {/* WELCOME SECTION */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
-          <div>
-            <h2 className="text-3xl font-black text-slate-900 tracking-tight">
-              Welcome back!
-            </h2>
-            <p className="text-slate-500 font-medium">
-              You have {trips.length} active {trips.length === 1 ? 'trip' : 'trips'}.
-            </p>
-          </div>
-          <Link 
-            href="/wizard"
-            className="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 flex items-center gap-2 w-fit"
-          >
-            <span className="text-xl">+</span> New Trip
-          </Link>
+      {/* ── Page Header ───────────────────────────────────────── */}
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight">My Trips</h1>
+          <p className="text-sm text-slate-500 font-medium mt-0.5">
+            {trips.length === 0
+              ? 'No trips yet — create your first one!'
+              : `${trips.length} trip${trips.length === 1 ? '' : 's'} total`}
+          </p>
         </div>
+        <Link
+          href="/wizard"
+          className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-md shadow-blue-200 hover:-translate-y-0.5"
+        >
+          <span className="text-lg leading-none">+</span>
+          New Trip
+        </Link>
+      </div>
 
-        {/* TRIPS GRID */}
-        {trips.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {trips.map((trip) => (
-              <Link 
-                key={trip.id} 
-                href={`/dashboard/trips/${trip.id}`}
-                className="group bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all hover:shadow-md"
+      {/* ── Trips Grid ────────────────────────────────────────── */}
+      {trips.length > 0 ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {trips.map(trip => {
+            const start = new Date(trip.startDate);
+            const end = new Date(trip.endDate);
+            const nights = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+            const duration = nights === 0 ? '1 day' : `${nights + 1} days`;
+            const dateStr = start.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+
+            return (
+              <Link
+                key={trip.id}
+                href={`/wizard/${trip.id}/summary`}
+                className="group bg-white rounded-2xl border border-slate-200 p-5 hover:border-blue-300 hover:shadow-md transition-all"
               >
-                <div className="flex justify-between items-start mb-4">
-                  <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center text-blue-600 text-xl font-bold group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                {/* Card top */}
+                <div className="flex items-start justify-between mb-3">
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg"
+                    style={{ background: 'linear-gradient(135deg, #dbeafe, #e0f2fe)' }}>
                     ✈️
                   </div>
-                  
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 bg-slate-50 px-2 py-1 rounded-md">
+                    {duration}
+                  </span>
                 </div>
-                <h3 className="font-black text-slate-900 text-lg mb-1">{trip.name}</h3>
-                <p className="text-slate-500 text-sm font-medium">View expenses & settlements →</p>
+
+                {/* Trip name */}
+                <h3 className="font-black text-slate-900 text-base mb-1 group-hover:text-blue-600 transition-colors">
+                  {trip.name}
+                </h3>
+                <p className="text-xs text-slate-500 font-medium mb-3">{dateStr}</p>
+
+                {/* Members */}
+                <div className="flex items-center gap-1.5">
+                  <div className="flex -space-x-1">
+                    {trip.members.slice(0, 4).map(m => (
+                      <div key={m.id}
+                        className="w-6 h-6 rounded-full bg-blue-100 border-2 border-white flex items-center justify-center text-[9px] font-black text-blue-600">
+                        {m.name.charAt(0).toUpperCase()}
+                      </div>
+                    ))}
+                    {trip._count.members > 4 && (
+                      <div className="w-6 h-6 rounded-full bg-slate-100 border-2 border-white flex items-center justify-center text-[9px] font-black text-slate-500">
+                        +{trip._count.members - 4}
+                      </div>
+                    )}
+                  </div>
+                  <span className="text-xs text-slate-400 font-medium">
+                    {trip._count.members} member{trip._count.members !== 1 ? 's' : ''}
+                  </span>
+                </div>
               </Link>
-            ))}
+            );
+          })}
+        </div>
+      ) : (
+        /* ── Empty State ─────────────────────────────────────── */
+        <div className="bg-white rounded-3xl border-2 border-dashed border-slate-200 p-12 text-center">
+          <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-4"
+            style={{ background: 'linear-gradient(135deg, #dbeafe, #e0f2fe)' }}>
+            🗺️
           </div>
-        ) : (
-          /* EMPTY STATE */
-          <div className="bg-white border-2 border-dashed border-slate-200 rounded-3xl p-12 text-center">
-            <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">
-              🗺️
-            </div>
-            <h3 className="text-lg font-bold text-slate-900 mb-1">No trips found</h3>
-            <p className="text-slate-500 text-sm mb-6 max-w-xs mx-auto">
-              Ready to split some costs? Create your first trip to get started.
-            </p>
-            <Link 
-              href="/dashboard/trips/new"
-              className="text-blue-600 font-bold hover:underline"
-            >
-              Create your first trip now
-            </Link>
-          </div>
-        )}
-      </main>
+          <h3 className="font-black text-slate-900 text-base mb-2">No trips yet</h3>
+          <p className="text-slate-500 text-sm font-medium mb-6 max-w-xs mx-auto">
+            Create your first trip to start tracking group expenses and calculating who owes what.
+          </p>
+          <Link
+            href="/wizard"
+            className="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-xl font-bold text-sm hover:bg-blue-700 transition-all shadow-md shadow-blue-200"
+          >
+            <span className="text-base leading-none">+</span>
+            Create your first trip
+          </Link>
+        </div>
+      )}
     </div>
   );
 }
