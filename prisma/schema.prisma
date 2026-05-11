@@ -12,8 +12,8 @@ datasource db {
   provider = "postgresql"
 }
 
-model User {
-  id    String @id @default(cuid())
+model User {  
+  id    String @id @default(uuid()) @db.Uuid
   email String @unique
   trips Trip[]
 }
@@ -23,7 +23,7 @@ model Trip {
   name      String
   startDate DateTime
   endDate   DateTime
-  userId    String
+  userId    String   @db.Uuid
   user      User     @relation(fields: [userId], references: [id])
   members   Member[]
 }

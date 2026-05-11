@@ -1,11 +1,11 @@
 import Link from 'next/link';
-import { UserButton } from '@clerk/nextjs';
-import { auth } from '@clerk/nextjs/server';
 import { redirect } from 'next/navigation';
+import { getSession } from '@/lib/auth';
+import { UserMenu } from '@/app/components/UserMenu';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const { userId } = await auth();
-  if (!userId) redirect('/sign-in');
+  const session = await getSession();
+  if (!session) redirect('/sign-in');
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: '#f8f9fc' }}>
@@ -22,7 +22,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <header className="sticky top-0 z-40 border-b border-slate-200/70 backdrop-blur-md"
         style={{ background: 'rgba(248,249,252,0.85)' }}>
         <nav className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
-          
+
           {/* Logo */}
           <Link href="/dashboard" className="flex items-center gap-2 group">
             <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white font-black text-sm shadow-sm"
@@ -40,7 +40,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               className="text-xs font-bold text-slate-500 hover:text-slate-900 transition-colors hidden sm:block">
               My Trips
             </Link>
-            <UserButton />
+            <UserMenu />
           </div>
         </nav>
       </header>

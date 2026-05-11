@@ -1,9 +1,8 @@
 'use server';
 
 import { db } from '@/lib/db';
-import { auth } from '@clerk/nextjs/server';
+import { getSession } from '@/lib/auth';
 
-// ── Create trip + members in a single action (for combined Step 1) ──────────
 export async function createTripWithMembers({
   name,
   startDate,
@@ -15,14 +14,12 @@ export async function createTripWithMembers({
   endDate: string;
   memberNames: string[];
 }): Promise<string> {
-  const { userId: clerkUserId } = await auth();
-  if (!clerkUserId) throw new Error('Unauthorized');
+  const session = await getSession();
+  if (!session) throw new Error('Unauthorized');
 
-  // Find the internal DB user
-  const user = await db.user.findUnique({ where: { id: clerkUserId } });
+  const user = await db.user.findUnique({ where: { id: session.user.id } });
   if (!user) throw new Error('User not found in database');
 
-  // Create trip + all members in a single transaction
   const trip = await db.trip.create({
     data: {
       name,
@@ -38,12 +35,11 @@ export async function createTripWithMembers({
   return trip.id;
 }
 
-// ── Original single-trip create (kept for backwards compat) ─────────────────
 export async function createTrip(formData: FormData) {
-  const { userId: clerkUserId } = await auth();
-  if (!clerkUserId) throw new Error('Unauthorized');
+  const session = await getSession();
+  if (!session) throw new Error('Unauthorized');
 
-  const user = await db.user.findUnique({ where: { id: clerkUserId } });
+  const user = await db.user.findUnique({ where: { id: session.user.id } });
   if (!user) throw new Error('User not found');
 
   const trip = await db.trip.create({

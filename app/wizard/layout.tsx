@@ -1,15 +1,11 @@
-// app/wizard/layout.tsx
-// The wizard lives OUTSIDE app/dashboard, so it needs its own layout
-// that mirrors the dashboard layout exactly.
-
 import Link from 'next/link';
-import { UserButton } from '@clerk/nextjs';
-import { auth } from '@clerk/nextjs/server';
 import { redirect } from 'next/navigation';
+import { getSession } from '@/lib/auth';
+import { UserMenu } from '@/app/components/UserMenu';
 
 export default async function WizardLayout({ children }: { children: React.ReactNode }) {
-  const { userId } = await auth();
-  if (!userId) redirect('/sign-in');
+  const session = await getSession();
+  if (!session) redirect('/sign-in');
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: '#f8f9fc' }}>
@@ -41,7 +37,7 @@ export default async function WizardLayout({ children }: { children: React.React
               className="text-xs font-bold text-slate-500 hover:text-slate-900 transition-colors hidden sm:block">
               ← My Trips
             </Link>
-            <UserButton />
+            <UserMenu />
           </div>
         </nav>
       </header>
