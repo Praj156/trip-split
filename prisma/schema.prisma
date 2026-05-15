@@ -1,46 +1,78 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client-js"
-  output   = "../generated/client"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")  // This is crucial!
 }
 
-model User {  
-  id    String @id @default(uuid()) @db.Uuid
-  email String @unique
-  trips Trip[]
+model User {
+  id        String   @id @default(uuid()) @db.Uuid
+  email     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  trips     Trip[]
 }
 
 model Trip {
-  id        String   @id @default(cuid())
-  name      String
-  startDate DateTime
-  endDate   DateTime
-  userId    String   @db.Uuid
-  user      User     @relation(fields: [userId], references: [id])
-  members   Member[]
+  id          String    @id @default(uuid()) @db.Uuid
+  name        String
+  description String?
+  startDate   DateTime?
+  endDate     DateTime?
+  userId      String    @db.Uuid
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  expenses    Expense[]
+  members     Member[]
 }
 
 model Member {
-  id        String    @id @default(cuid())
+  id        String    @id @default(uuid()) @db.Uuid
   name      String
-  tripId    String
-  trip      Trip      @relation(fields: [tripId], references: [id])
-  expenses  Expense[] // A member can have multiple expense entries
+  tripId    String    @db.Uuid
+  trip      Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+  payments  Payment[] @relation("PaymentFrom")
+  paymentsReceived Payment[] @relation("PaymentTo")
+  splits    Split[]
 }
 
 model Expense {
-  id            String   @id @default(cuid())
-  amount        Float
-  description   String?  // e.g., "Dinner" or "Activity"
-  sharedWithIds String[] // The IDs of members sharing this specific amount
-  memberId      String
-  member        Member   @relation(fields: [memberId], references: [id])
+  id          String   @id @default(uuid()) @db.Uuid
+  description String
+  amount      Float
+  date        DateTime @default(now())
+  tripId      String   @db.Uuid
+  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  paidById    String   @db.Uuid
+  paidBy      Member   @relation(fields: [paidById], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  splits      Split[]
+}
+
+model Split {
+  id         String   @id @default(uuid()) @db.Uuid
+  amount     Float
+  expenseId  String   @db.Uuid
+  expense    Expense  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  memberId   String   @db.Uuid
+  member     Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([expenseId, memberId])
+}
+
+model Payment {
+  id        String   @id @default(uuid()) @db.Uuid
+  amount    Float
+  fromId    String   @db.Uuid
+  from      Member   @relation("PaymentFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  toId      String   @db.Uuid
+  to        Member   @relation("PaymentTo", fields: [toId], references: [id], onDelete: Cascade)
+  tripId    String   @db.Uuid
+  createdAt DateTime @default(now())
 }

@@ -1,23 +1,40 @@
-'use server';
+import { createClient } from '@/lib/supabase/server';
+import { prisma } from '@/lib/prisma';
 
-import { createClient } from './supabase/server';
-
-export async function getSession() {
+export async function getCurrentUser() {
   const supabase = await createClient();
+  
   const {
     data: { session },
   } = await supabase.auth.getSession();
-  return session;
+
+  if (!session) {
+    return null;
+  }
+
+  return session.user;
 }
 
-export async function getCurrentUser() {
-  const session = await getSession();
-  if (!session) return null;
+export async function checkUser() {
+  const user = await getCurrentUser();
+  
+  if (!user) {
+    return null;
+  }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Check if user exists in database, create if not
+  let dbUser = await prisma.user.findUnique({
+    where: { id: user.id },
+  });
 
-  return user;
+  if (!dbUser) {
+    dbUser = await prisma.user.create({
+      data: {
+        id: user.id,
+        email: user.email!,
+      },
+    });
+  }
+
+  return dbUser;
 }

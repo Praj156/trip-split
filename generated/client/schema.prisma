@@ -23,7 +23,7 @@ model Trip {
   name      String
   startDate DateTime
   endDate   DateTime
-  userId    String
+  userId    String   @db.Uuid
   user      User     @relation(fields: [userId], references: [id])
   members   Member[]
 }
