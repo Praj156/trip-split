@@ -1,9 +1,9 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { getSession } from '@/lib/auth';
+import { getCurrentUser } from '@/lib/auth';
 
 export default async function HomePage() {
-  const session = await getSession();
+  const session = await getCurrentUser();
   if (session) redirect('/dashboard');
 
   return (
@@ -62,26 +62,23 @@ export default async function HomePage() {
         </div>
 
         {/* FEATURE GRID */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 w-full max-w-3xl">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 w-full max-w-3xl">
+          
+
           <div className="bg-white/40 backdrop-blur-md p-5 rounded-2xl border border-white/60 shadow-sm text-center">
-            <h3 className="font-black text-lg text-gray-900 mb-1.5">Custom Groups</h3>
-            <p className="text-gray-500 text-xs font-medium leading-relaxed">Organize participants into custom groups for smarter tracking.</p>
+            <h3 className="font-black text-lg text-gray-900 mb-0.5">Precise Splitting</h3>
+            <p className="text-gray-500 text-sm font-medium leading-relaxed">Select exactly which members owe for every individual expense.</p>
           </div>
 
           <div className="bg-white/40 backdrop-blur-md p-5 rounded-2xl border border-white/60 shadow-sm text-center">
-            <h3 className="font-black text-lg text-gray-900 mb-1.5">Precise Splitting</h3>
-            <p className="text-gray-500 text-xs font-medium leading-relaxed">Select exactly which members owe for every individual expense.</p>
-          </div>
-
-          <div className="bg-white/40 backdrop-blur-md p-5 rounded-2xl border border-white/60 shadow-sm text-center">
-            <h3 className="font-black text-lg text-gray-900 mb-1.5">Auto-Settlement</h3>
-            <p className="text-gray-500 text-xs font-medium leading-relaxed">Get the most efficient path to settle all debts with one summary.</p>
+            <h3 className="font-black text-lg text-gray-900 mb-0.5">Auto-Settlement</h3>
+            <p className="text-gray-500 text-sm font-medium leading-relaxed">Get the most efficient path to settle all debts with one summary.</p>
           </div>
         </div>
       </main>
 
       {/* FOOTER */}
-      <footer className="relative z-10 py-6 mt-auto bg-slate-100/30 border-t border-slate-200/40 backdrop-blur-sm">
+      <footer className="relative z-10 py-4 mt-auto bg-slate-100/30 border-t border-slate-200/40 backdrop-blur-sm">
         <div className="max-w-6xl mx-auto px-6 text-center">
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.4em]">
             &copy; {new Date().getFullYear()} TripSplit

@@ -1,10 +1,10 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { getSession } from '@/lib/auth';
+import { getCurrentUser } from '@/lib/auth';
 import { UserMenu } from '@/app/components/UserMenu';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const session = await getSession();
+  const session = await getCurrentUser();
   if (!session) redirect('/sign-in');
 
   return (

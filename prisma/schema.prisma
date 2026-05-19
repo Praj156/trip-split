@@ -4,8 +4,6 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")  // This is crucial!
 }
 
 model User {
@@ -39,6 +37,7 @@ model Member {
   payments  Payment[] @relation("PaymentFrom")
   paymentsReceived Payment[] @relation("PaymentTo")
   splits    Split[]
+  expenses    Expense[]
 }
 
 model Expense {
