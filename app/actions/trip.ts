@@ -115,19 +115,19 @@ export async function updateTripWithMembers({
   });
   if (!trip) throw new Error('Trip not found');
 
-  const existingNames = trip.members.map(m => m.name.toLowerCase());
-  const newNamesLowerCase = memberNames.map(n => n.toLowerCase());
+  const existingNames = trip.members.map((m: any) => m.name.toLowerCase());
+  const newNamesLowerCase = memberNames.map((n: string) => n.toLowerCase());
   
   // Find members to remove (case insensitive)
-  const membersToRemove = trip.members.filter(m => !newNamesLowerCase.includes(m.name.toLowerCase()));
+  const membersToRemove = trip.members.filter((m: any) => !newNamesLowerCase.includes(m.name.toLowerCase()));
   
   // Find members to add (names that don't match existing)
-  const namesToAdd = memberNames.filter(n => !existingNames.includes(n.toLowerCase()));
+  const namesToAdd = memberNames.filter((n: string) => !existingNames.includes(n.toLowerCase()));
 
   if (membersToRemove.length > 0) {
     const membersWithExpenses = await db.member.findMany({
       where: {
-        id: { in: membersToRemove.map(m => m.id) },
+        id: { in: membersToRemove.map((m: any) => m.id) },
         expenses: { some: {} }
       }
     });
@@ -136,7 +136,7 @@ export async function updateTripWithMembers({
     }
   }
 
-  await db.$transaction(async (tx) => {
+  await db.$transaction(async (tx: any) => {
     await tx.trip.update({
       where: { id: tripId },
       data: {
