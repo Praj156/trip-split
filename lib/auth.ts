@@ -1,14 +1,20 @@
 import { createClient } from '@/lib/supabase/server';
 import { prisma } from '@/lib/prisma';
 
-export async function getCurrentUser() {
+export async function getSession() {
   const supabase = await createClient();
-  
+
   const {
     data: { session },
   } = await supabase.auth.getSession();
 
-  if (!session) {
+  return session ?? null;
+}
+
+export async function getCurrentUser() {
+  const session = await getSession();
+
+  if (!session || !session.user) {
     return null;
   }
 

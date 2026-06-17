@@ -7,6 +7,11 @@ import { saveExpenses } from '@/app/actions/sharing';
 interface Member {
   id: string;
   name: string;
+  expenses?: {
+    amount: number;
+    description: string;
+    sharedWithIds: string[];
+  }[];
 }
 
 interface Expense {
@@ -23,25 +28,37 @@ interface MemberExpenseData {
 
 export default function SharingForm({ 
   tripId, 
-  members 
+  members,
+  currency = 'AED'
 }: { 
   tripId: string; 
-  members: Member[] 
+  members: Member[];
+  currency?: string;
 }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [showBackWarning, setShowBackWarning] = useState(false);
 
-  // Initialize: each member gets one empty expense shared with everyone
-  const [data, setData] = useState<MemberExpenseData[]>(
-    members.map(m => ({
-      memberId: m.id,
-      name: m.name,
-      expenses: [{
-        amount: 0,
-        description: '',
-        sharedWithIds: members.map(all => all.id)
-      }]
-    }))
+  // Initialize: load existing expenses if available, otherwise default to one empty row per member shared with everyone
+  const [data, setData] = useState<MemberExpenseData[]>(() =>
+    members.map(m => {
+      const hasSavedExpenses = m.expenses && m.expenses.length > 0;
+      return {
+        memberId: m.id,
+        name: m.name,
+        expenses: hasSavedExpenses
+          ? m.expenses!.map(e => ({
+              amount: e.amount,
+              description: e.description || '',
+              sharedWithIds: e.sharedWithIds.length > 0 ? e.sharedWithIds : members.map(all => all.id),
+            }))
+          : [{
+              amount: 0,
+              description: '',
+              sharedWithIds: members.map(all => all.id)
+            }]
+      };
+    })
   );
 
   const addExpenseRow = (memberIndex: number) => {
@@ -138,6 +155,7 @@ export default function SharingForm({
                       placeholder="0.00"
                       value={expense.amount || ''}
                       onChange={e => updateField(mIdx, eIdx, 'amount', parseFloat(e.target.value) || 0)}
+                      onWheel={e => (e.target as HTMLElement).blur()}
                       className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm font-bold text-slate-900 placeholder-slate-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all"
                     />
                   </div>
@@ -192,7 +210,7 @@ export default function SharingForm({
                   {/* Split amount preview */}
                   {expense.amount > 0 && expense.sharedWithIds.length > 0 && (
                     <p className="text-xs text-slate-500 font-medium mt-2">
-                      Split: {(expense.amount / expense.sharedWithIds.length).toFixed(2)} per person
+                      Split: {(expense.amount / expense.sharedWithIds.length).toFixed(2)} {currency} per person
                     </p>
                   )}
                 </div>
@@ -250,7 +268,7 @@ export default function SharingForm({
 
         <button
           type="button"
-          onClick={() => router.back()}
+          onClick={() => setShowBackWarning(true)}
           className="w-full py-2.5 text-slate-400 text-sm font-bold hover:text-slate-600 transition-colors"
         >
           ← Back to Trip Details
@@ -262,6 +280,47 @@ export default function SharingForm({
         <p className="text-xs text-center text-slate-400 font-medium">
           Add at least one expense with an amount to continue.
         </p>
+      )}
+
+      {/* ── BACK WARNING MODAL ──────────────────────────────── */}
+      {showBackWarning && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          {/* Backdrop */}
+          <div 
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => setShowBackWarning(false)}
+          />
+          {/* Modal */}
+          <div className="relative bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 max-w-sm w-full space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                <span className="text-lg">⚠️</span>
+              </div>
+              <div>
+                <h3 className="font-black text-slate-900 text-base">Go back to Trip Details?</h3>
+                <p className="text-sm text-slate-500 mt-1">
+                  Any expense details you&apos;ve entered on this page will <strong className="text-slate-700">not be saved</strong>. You&apos;ll need to re-enter them when you return.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowBackWarning(false)}
+                className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 text-sm font-bold text-slate-600 hover:bg-slate-50 transition-all"
+              >
+                Stay Here
+              </button>
+              <button
+                type="button"
+                onClick={() => router.push(`/wizard/${tripId}/edit`)}
+                className="flex-1 py-2.5 rounded-xl bg-amber-500 text-white text-sm font-bold hover:bg-amber-600 transition-all shadow-lg shadow-amber-100"
+              >
+                Go Back
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

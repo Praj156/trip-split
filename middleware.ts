@@ -29,7 +29,7 @@ export async function middleware(request: NextRequest) {
     data: { session },
   } = await supabase.auth.getSession();
 
-  const publicRoutes = ['/', '/sign-in', '/sign-up'];
+  const publicRoutes = ['/', '/sign-in', '/sign-up', '/forgot-password', '/reset-password'];
   const isPublic = publicRoutes.some((route) =>
     request.nextUrl.pathname === route ||
     (route.includes('sign-') && request.nextUrl.pathname.startsWith(route))

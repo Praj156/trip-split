@@ -9,11 +9,16 @@ export default async function SharingPage({
 }) {
   const { tripId } = await params;
 
-  // Fetch trip with members
+  // Fetch trip with members and their existing expenses
   const trip = await db.trip.findUnique({
     where: { id: tripId },
     include: { 
       members: {
+        include: {
+          expenses: {
+            orderBy: { createdAt: 'asc' }
+          }
+        },
         orderBy: { name: 'asc' }
       }
     },
@@ -41,7 +46,7 @@ export default async function SharingPage({
         <p className="text-sm text-slate-500">Add expenses and choose who shares the cost.</p>
       </div>
 
-      <SharingForm tripId={tripId} members={trip.members} />
+      <SharingForm tripId={tripId} members={trip.members} currency={trip.currency} />
     </div>
   );
 }

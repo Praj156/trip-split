@@ -7,17 +7,21 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid()) @db.Uuid
-  email     String   @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  trips     Trip[]
+  id              String   @id @default(uuid()) @db.Uuid
+  email           String   @unique
+  name            String?
+  defaultCurrency String   @default("AED")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  trips           Trip[]
 }
 
 model Trip {
   id          String    @id @default(uuid()) @db.Uuid
   name        String
   description String?
+  status      String    @default("active")
+  currency    String    @default("AED")
   startDate   DateTime?
   endDate     DateTime?
   userId      String    @db.Uuid
@@ -41,16 +45,17 @@ model Member {
 }
 
 model Expense {
-  id          String   @id @default(uuid()) @db.Uuid
-  description String
-  amount      Float
-  date        DateTime @default(now())
-  tripId      String   @db.Uuid
-  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  paidById    String   @db.Uuid
-  paidBy      Member   @relation(fields: [paidById], references: [id], onDelete: Cascade)
-  createdAt   DateTime @default(now())
-  splits      Split[]
+  id            String   @id @default(uuid()) @db.Uuid
+  description   String
+  amount        Float
+  date          DateTime @default(now())
+  tripId        String   @db.Uuid
+  trip          Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  paidById      String   @db.Uuid
+  paidBy        Member   @relation(fields: [paidById], references: [id], onDelete: Cascade)
+  sharedWithIds String[]
+  createdAt     DateTime @default(now())
+  splits        Split[]
 }
 
 model Split {

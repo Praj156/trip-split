@@ -1,8 +1,7 @@
 // lib/db.ts
 import { Pool } from 'pg'
 import { PrismaPg } from '@prisma/adapter-pg'
-// IMPORTANT: Import from the folder you specified in schema.prisma
-import { PrismaClient } from '../generated/client'
+import { PrismaClient } from '@prisma/client'
 
 const connectionString = process.env.DATABASE_URL
 

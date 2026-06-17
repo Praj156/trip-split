@@ -74,6 +74,15 @@ export default function SignInPage() {
             />
           </div>
 
+          <div className="text-right">
+            <Link
+              href="/forgot-password"
+              className="text-sm text-blue-600 hover:text-blue-700 font-semibold"
+            >
+              Forgot password?
+            </Link>
+          </div>
+
           {error && (
             <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">
               {error}

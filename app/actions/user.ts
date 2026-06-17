@@ -23,3 +23,29 @@ export async function checkUser() {
 
   return newUser;
 }
+
+export async function checkEmailExists(email: string) {
+  const user = await db.user.findUnique({
+    where: { email },
+  });
+  return !!user;
+}
+
+export async function getUserProfile() {
+  const user = await getCurrentUser();
+  if (!user) return null;
+  return db.user.findUnique({ where: { id: user.id } });
+}
+
+export async function updateProfile(data: { name: string; defaultCurrency: string }) {
+  const user = await getCurrentUser();
+  if (!user) throw new Error('Unauthorized');
+
+  return db.user.update({
+    where: { id: user.id },
+    data: {
+      name: data.name,
+      defaultCurrency: data.defaultCurrency,
+    },
+  });
+}

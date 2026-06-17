@@ -1,21 +1,21 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { getSession } from '@/lib/auth';
+import { getCurrentUser } from '@/lib/auth';
 import { UserMenu } from '@/app/components/UserMenu';
 
 export default async function WizardLayout({ children }: { children: React.ReactNode }) {
-  const session = await getSession();
-  if (!session) redirect('/sign-in');
+  const user = await getCurrentUser();
+  if (!user) redirect('/sign-in');
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: '#f8f9fc' }}>
+    <div className="min-h-screen flex flex-col">
 
       {/* Subtle background gradient blobs */}
       <div className="fixed inset-0 -z-10 pointer-events-none overflow-hidden">
-        <div className="absolute top-0 right-0 w-[600px] h-[600px] rounded-full opacity-30"
-          style={{ background: 'radial-gradient(circle, #dbeafe 0%, transparent 70%)', transform: 'translate(30%, -30%)' }} />
-        <div className="absolute bottom-0 left-0 w-[500px] h-[500px] rounded-full opacity-20"
-          style={{ background: 'radial-gradient(circle, #ccfbf1 0%, transparent 70%)', transform: 'translate(-30%, 30%)' }} />
+        <div className="absolute top-0 right-0 w-[600px] h-[600px] rounded-full opacity-35"
+          style={{ background: 'radial-gradient(circle, #ccfbf1 0%, transparent 70%)', transform: 'translate(30%, -30%)' }} />
+        <div className="absolute bottom-0 left-0 w-[500px] h-[500px] rounded-full opacity-25"
+          style={{ background: 'radial-gradient(circle, #d1fae5 0%, transparent 70%)', transform: 'translate(-30%, 30%)' }} />
       </div>
 
       {/* ─── HEADER ─────────────────────────────────────────────── */}
@@ -24,7 +24,7 @@ export default async function WizardLayout({ children }: { children: React.React
         <nav className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
           <Link href="/dashboard" className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white font-black text-sm shadow-sm"
-              style={{ background: 'linear-gradient(135deg, #2563eb, #0ea5e9)' }}>
+              style={{ background: 'linear-gradient(135deg, #0d9488, #14b8a6)' }}>
               T
             </div>
             <span className="font-black text-slate-900 tracking-tighter uppercase text-sm">

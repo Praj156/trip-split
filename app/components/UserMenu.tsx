@@ -43,6 +43,13 @@ export function UserMenu() {
             <p className="text-sm text-gray-600">Signed in as</p>
             <p className="text-sm font-semibold text-gray-900 truncate">{email}</p>
           </div>
+          <Link
+            href="/profile"
+            onClick={() => setIsOpen(false)}
+            className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-slate-50 transition-colors"
+          >
+            Profile & Settings
+          </Link>
           <button
             onClick={handleSignOut}
             className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-slate-50 transition-colors"
