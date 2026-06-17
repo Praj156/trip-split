@@ -16,7 +16,7 @@ export async function saveExpenses(tripId: string, memberData: any[]) {
   )
 
   // Use a transaction to delete existing expenses and insert new ones
-  await db.$transaction(async (tx) => {
+  await db.$transaction(async (tx: any) => {
     await tx.expense.deleteMany({
       where: { tripId },
     });
