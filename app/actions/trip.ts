@@ -149,13 +149,13 @@ export async function updateTripWithMembers({
 
     if (membersToRemove.length > 0) {
       await tx.member.deleteMany({
-        where: { id: { in: membersToRemove.map(m => m.id) } }
+        where: { id: { in: membersToRemove.map((m: any) => m.id) } }
       });
     }
 
     if (namesToAdd.length > 0) {
       await tx.member.createMany({
-        data: namesToAdd.map(n => ({ name: n, tripId }))
+        data: namesToAdd.map((n: string) => ({ name: n, tripId }))
       });
     }
   });
