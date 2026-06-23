@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { updateProfile } from '../actions/user';
-import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
@@ -12,9 +11,6 @@ export default function ProfileForm({ initialData }: { initialData: { name: stri
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileMessage, setProfileMessage] = useState('');
   const [profileError, setProfileError] = useState('');
-  
-
-  const supabase = createClient();
   const router = useRouter();
 
   const handleProfileSubmit = async (e: React.FormEvent) => {
