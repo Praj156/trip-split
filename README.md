@@ -41,10 +41,12 @@ npm run dev                  # http://localhost:3000
 2. In Vercel, choose **Add New → Project** and import the repo. The framework is detected as Next.js automatically.
 3. Under **Environment Variables**, add `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `DATABASE_URL` and `NEXT_PUBLIC_SITE_URL` (see `.env.example`). `DIRECT_URL` is only needed where you run `db:push`.
 4. Deploy.
-5. In Supabase, go to **Authentication → URL Configuration**. Set **Site URL** to your Vercel URL, and add these to **Redirect URLs**:
-   - `https://your-app.vercel.app/auth/callback`
-   - `https://your-app.vercel.app/reset-password`
-   - (and the same with `http://localhost:3000` for local development)
+5. In Supabase, go to **Authentication → URL Configuration**. Set **Site URL** to your Vercel URL (live: `https://trip-split-peach.vercel.app`), and add these to **Redirect URLs**:
+   - `https://trip-split-peach.vercel.app/**`
+   - `http://localhost:3000/**` (for local development)
+
+   The **Site URL** is what `{{ .SiteURL }}` becomes in the email templates, so email links always open the live site.
+6. In Vercel, set `NEXT_PUBLIC_SITE_URL=https://trip-split-peach.vercel.app` and redeploy (it's read at build time). Member links shared on WhatsApp use it.
 
 ## Emails (sign-up confirmation and password reset)
 
@@ -63,7 +65,7 @@ To make emails reach real users and show **TripSplit** as the sender, connect yo
    - **Sender email:** the address you verified (e.g. `tripsplit.app@gmail.com`)
    - **Sender name:** `TripSplit`
    - Host, port, username and password from step 1.
-3. Under **Authentication → Emails → Templates**, paste the branded templates from this repo:
+3. Under **Authentication → Emails → Templates**, paste the branded templates from this repo. Their links go to `/auth/confirm`, which works on any device (a reset requested on a laptop can be finished on a phone); the default `{{ .ConfirmationURL }}` links only work in the browser that asked for them:
    - *Confirm signup*: subject `Confirm your TripSplit account`, body from `supabase/templates/confirm-signup.html`
    - *Reset password*: subject `Reset your TripSplit password`, body from `supabase/templates/reset-password.html`
 4. Under **Authentication → Rate Limits**, raise *Emails sent per hour* (e.g. to 30) now that you use your own SMTP.

@@ -15,16 +15,20 @@ export default function ResetPasswordPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [linkExpired, setLinkExpired] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
     const supabase = createClient();
     const url = new URL(window.location.href);
     const fromEmailLink = url.searchParams.has('code') || url.hash.includes('type=recovery');
+    // /auth/confirm sends people here with ?error=link when the link has expired or was used.
+    const expired = url.searchParams.get('error') === 'link';
 
     // The browser client exchanges the link's code for a session on load.
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session || fromEmailLink) setShowForm(true);
+      else if (expired) setLinkExpired(true);
     });
 
     const { data } = supabase.auth.onAuthStateChange((event, session) => {
@@ -71,9 +75,15 @@ export default function ResetPasswordPage() {
       footer={<Link href="/forgot-password" className={linkClass}>Request a new reset link</Link>}
     >
       {!showForm ? (
-        <FormMessage kind="info">
-          Open the reset link from your email to set a new password. Links expire after a short time.
-        </FormMessage>
+        linkExpired ? (
+          <FormMessage kind="error">
+            That reset link has expired or was already used. Request a new one below.
+          </FormMessage>
+        ) : (
+          <FormMessage kind="info">
+            Open the reset link from your email to set a new password. Links expire after a short time.
+          </FormMessage>
+        )
       ) : (
         <form onSubmit={handleUpdate} className="space-y-4">
           <div>
