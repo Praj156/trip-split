@@ -1,19 +1,22 @@
 import { db } from '@/lib/db';
-import { notFound } from 'next/navigation';
-import { checkUser } from '../../../actions/user';
+import { notFound, redirect } from 'next/navigation';
+import { checkUser } from '@/lib/auth';
+import { getOwnedTrip } from '@/lib/access';
 import NewTripForm from '../../NewTripForm';
+import { Steps, ui } from '@/app/components/ui';
+
+export const metadata = { title: 'Edit trip' };
 
 export default async function EditTripPage({ params }: { params: Promise<{ tripId: string }> }) {
   const { tripId } = await params;
   const user = await checkUser();
   if (!user) notFound();
 
-  const trip = await db.trip.findUnique({
-    where: { id: tripId, userId: user.id },
-    include: { members: true },
-  });
-
-  if (!trip) notFound();
+  const owned = await getOwnedTrip(tripId);
+  if (!owned) notFound();
+  if (owned.status !== 'active') redirect(`/wizard/${owned.id}/summary`);
+  const members = await db.member.findMany({ where: { tripId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+  const trip = { ...owned, members };
 
   const initialData = {
     name: trip.name,
@@ -24,26 +27,11 @@ export default async function EditTripPage({ params }: { params: Promise<{ tripI
   };
 
   return (
-    <div className="max-w-xl mx-auto px-4 py-8">
-      <div className="mb-8">
-        <div className="flex items-center gap-2 mb-1">
-          <div className="flex items-center gap-1.5">
-            <span className="w-6 h-6 rounded-full bg-indigo-600 text-white text-[10px] font-black flex items-center justify-center">1</span>
-            <div className="w-8 h-0.5 bg-slate-200 rounded" />
-            <span className="w-6 h-6 rounded-full bg-slate-200 text-slate-400 text-[10px] font-black flex items-center justify-center">2</span>
-            <div className="w-8 h-0.5 bg-slate-200 rounded" />
-            <span className="w-6 h-6 rounded-full bg-slate-200 text-slate-400 text-[10px] font-black flex items-center justify-center">3</span>
-          </div>
-        </div>
-        <h1 className="text-2xl font-black text-slate-900 mt-4">Edit Trip</h1>
-        <p className="text-sm text-slate-500">Update trip details and members.</p>
-      </div>
-
-      <NewTripForm
-        defaultCurrency={user.defaultCurrency || 'AED'}
-        tripId={tripId}
-        initialData={initialData}
-      />
+    <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+      <Steps current={1} />
+      <h1 className={`${ui.pageTitle} mt-4`}>Edit trip</h1>
+      <p className="text-sm text-ink-2 mt-1 mb-5">Change the details or members. Expenses are kept.</p>
+      <NewTripForm defaultCurrency={user.defaultCurrency || 'AED'} tripId={tripId} initialData={initialData} />
     </div>
   );
 }

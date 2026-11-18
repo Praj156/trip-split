@@ -1,160 +1,84 @@
 @import "tailwindcss";
 
-:root {
-  --background: #EFFBF5;
-  --foreground: #333333;
-}
-
+/*
+ * TripSplit design tokens ("Road trip" direction).
+ * Navy carries text and dark surfaces, teal is the action colour,
+ * sunset orange and peach are warm accents used sparingly.
+ */
 @theme {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* Small text keeps a readable floor when laptops scale the interface down (see below). */
+  --text-xs: max(0.75rem, 11.5px);
+  --text-sm: max(0.875rem, 12.75px);
+  --font-sans: var(--font-body), system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: var(--font-display-face), var(--font-body), system-ui, sans-serif;
 
-  /* Primary Forest Green override for Indigo */
-  --color-indigo-50: #f0f7f5;
-  --color-indigo-100: #dbece6;
-  --color-indigo-200: #badad0;
-  --color-indigo-300: #8ec1b4;
-  --color-indigo-400: #5da393;
-  --color-indigo-500: #3b8575;
-  --color-indigo-600: #083f37;
-  --color-indigo-700: #06332c;
-  --color-indigo-800: #052924;
-  --color-indigo-900: #04211d;
-  --color-indigo-950: #02100e;
-
-  /* Secondary Accent Emerald override for Blue & Emerald */
-  --color-blue-50: #f0fdf9;
-  --color-blue-100: #ccfbf0;
-  --color-blue-200: #99f6e0;
-  --color-blue-300: #5eeacc;
-  --color-blue-400: #2dd4b2;
-  --color-blue-500: #14b896;
-  --color-blue-600: #00a381;
-  --color-blue-700: #008266;
-  --color-blue-800: #006650;
-  --color-blue-900: #005442;
-  --color-blue-950: #003328;
-
-  --color-emerald-50: #f0fdf9;
-  --color-emerald-100: #ccfbf0;
-  --color-emerald-200: #99f6e0;
-  --color-emerald-300: #5eeacc;
-  --color-emerald-400: #2dd4b2;
-  --color-emerald-500: #14b896;
-  --color-emerald-600: #00a381;
-  --color-emerald-700: #008266;
-  --color-emerald-800: #006650;
-  --color-emerald-900: #005442;
-  --color-emerald-950: #003328;
-
-  /* Tertiary Contrast Terracotta override for red / orange / amber */
-  --color-red-50: #fdf8f6;
-  --color-red-100: #fbeee9;
-  --color-red-200: #f6dbd1;
-  --color-red-300: #eec0b0;
-  --color-red-400: #e39d84;
-  --color-red-500: #d67958;
-  --color-red-600: #c27357;
-  --color-red-700: #a35c43;
-  --color-red-800: #824a35;
-  --color-red-900: #6b3d2c;
-  --color-red-950: #3c2219;
-
-  --color-orange-50: #fdf8f6;
-  --color-orange-100: #fbeee9;
-  --color-orange-200: #f6dbd1;
-  --color-orange-300: #eec0b0;
-  --color-orange-400: #e39d84;
-  --color-orange-500: #d67958;
-  --color-orange-600: #c27357;
-  --color-orange-700: #a35c43;
-  --color-orange-800: #824a35;
-  --color-orange-900: #6b3d2c;
-  --color-orange-950: #3c2219;
-
-  --color-amber-50: #fdf8f6;
-  --color-amber-100: #fbeee9;
-  --color-amber-200: #f6dbd1;
-  --color-amber-300: #eec0b0;
-  --color-amber-400: #e39d84;
-  --color-amber-500: #d67958;
-  --color-amber-600: #c27357;
-  --color-amber-700: #a35c43;
-  --color-amber-800: #824a35;
-  --color-amber-900: #6b3d2c;
-  --color-amber-950: #3c2219;
-
-  /* Muted Text override for slate */
-  --color-slate-50: #f6f8f8;
-  --color-slate-100: #edf0f0;
-  --color-slate-200: #dbe0e0;
-  --color-slate-300: #c3cccc;
-  --color-slate-400: #a7b5b5;
-  --color-slate-500: #8f9e9e;
-  --color-slate-600: #738282;
-  --color-slate-700: #5c6969;
-  --color-slate-800: #4b5555;
-  --color-slate-900: #3e4747;
-  --color-slate-950: #212727;
+  --color-navy: #13324a;
+  --color-navy-2: #1d4462;
+  --color-ink-2: #3d5568; /* secondary text, 7:1 on white */
+  --color-ink-3: #5a7084; /* tertiary text, 4.9:1 on white */
+  --color-sky: #f3f6fa; /* page background */
+  --color-line: #dde5ee; /* borders */
+  --color-line-2: #c9d6e3;
+  --color-teal: #0f6e68; /* primary actions */
+  --color-teal-2: #0a524d; /* hover */
+  --color-teal-soft: #e7f7f5;
+  --color-teal-mid: #7fd6cf;
+  --color-sunset: #ff9b5c;
+  --color-sunset-soft: #fff3ea;
+  --color-sunset-ink: #8a4a1f;
+  --color-peach: #ffc48c;
+  --color-danger: #b42318;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+:root {
+  color-scheme: light;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background: var(--color-sky);
+  color: var(--color-navy);
+  font-family: var(--font-sans);
 }
 
-/* Custom Scrollbar */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.3);
-  border-radius: 99px;
-  border: 2px solid transparent;
-  background-clip: padding-box;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.5);
-  border: 2px solid transparent;
-  background-clip: padding-box;
-}
-
-/* Selection */
 ::selection {
-  background-color: rgba(23, 77, 56, 0.15);
-  color: rgb(23, 77, 56);
+  background-color: rgba(15, 110, 104, 0.18);
 }
 
-/* Custom modern backdrop glass panel utility */
-.glass-panel {
-  background: rgba(255, 255, 255, 0.65);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.4);
+:focus-visible {
+  outline: 2px solid var(--color-teal);
+  outline-offset: 2px;
 }
 
-.glass-card {
-  background: rgba(255, 255, 255, 0.4);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.03);
+.tabular {
+  font-variant-numeric: tabular-nums;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media print {
+  header, footer, .no-print {
+    display: none !important;
+  }
+  body,
+  .bg-sky {
+    background: #fff !important;
+  }
+}
+
+/* Laptop and up: scale the whole interface to 87.5%. Every size in the app is in
+   rem, so this one rule shrinks text, spacing, buttons and boxes evenly, while
+   phones and tablets keep the larger, touch-friendly sizes. */
+@media (min-width: 1024px) {
+  html {
+    font-size: 14px;
+  }
+}

@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { createTripWithMembers, updateTripWithMembers } from '../actions/trip';
+import { CURRENCIES, DATE_MAX, DATE_MIN, hasLetterOrDigit, isDateInRange, LIMITS } from '@/lib/validation';
+import { Avatar, ui } from '@/app/components/ui';
 
 interface Member {
   id: number;
@@ -26,7 +28,7 @@ export default function NewTripForm({
 }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const [dateError, setDateError] = useState('');
+  const [submitError, setSubmitError] = useState('');
   const [memberError, setMemberError] = useState('');
   const [newMemberName, setNewMemberName] = useState('');
   const memberInputRef = useRef<HTMLInputElement>(null);
@@ -43,33 +45,40 @@ export default function NewTripForm({
   );
 
   const [members, setMembers] = useState<Member[]>(initialData?.members || []);
-  const nextId = useRef(initialData?.members ? Math.max(...initialData.members.map(m => m.id)) + 1 : 1);
+  const nextId = useRef(initialData?.members?.length ? Math.max(...initialData.members.map(m => m.id)) + 1 : 1);
 
-  // Real-time date validation
-  useEffect(() => {
-    if (isMultiDay && formData.startDate && formData.endDate) {
-      const start = new Date(formData.startDate);
-      const end = new Date(formData.endDate);
-      if (start > end) {
-        setDateError('End date must be on or after the start date.');
-      } else {
-        setDateError('');
-      }
-    } else {
-      setDateError('');
-    }
-  }, [formData.startDate, formData.endDate, isMultiDay]);
+  // Derived, so it is always in sync with the inputs.
+  const badDate = (v: string) => v !== '' && !isDateInRange(v);
+  const dateError =
+    badDate(formData.startDate) || (isMultiDay && badDate(formData.endDate))
+      ? 'Enter a real date between 2000 and 2100.'
+      : isMultiDay && formData.startDate && formData.endDate && formData.startDate > formData.endDate
+        ? 'End date must be on or after the start date.'
+        : '';
+  const nameError =
+    formData.name.trim() && !hasLetterOrDigit(formData.name) ? 'Use at least one letter or number in the trip name.' : '';
 
-  // Sync end date with start date if not multi-day
-  useEffect(() => {
-    if (!isMultiDay && formData.startDate) {
-      setFormData(prev => ({ ...prev, endDate: prev.startDate }));
-    }
-  }, [isMultiDay, formData.startDate]);
+  const setStartDate = (startDate: string) =>
+    setFormData((prev) => ({ ...prev, startDate, endDate: isMultiDay ? prev.endDate : startDate }));
+
+  const toggleMultiDay = () => {
+    setIsMultiDay((multi) => {
+      if (multi) setFormData((prev) => ({ ...prev, endDate: prev.startDate }));
+      return !multi;
+    });
+  };
 
   const addMember = () => {
-    const trimmed = newMemberName.trim();
+    const trimmed = newMemberName.replace(/\s+/g, ' ').trim();
     if (!trimmed) return;
+    if (!hasLetterOrDigit(trimmed)) {
+      setMemberError('A member name needs at least one letter or number.');
+      return;
+    }
+    if (members.length >= LIMITS.members) {
+      setMemberError(`A trip can have up to ${LIMITS.members} members.`);
+      return;
+    }
 
     if (members.some(m => m.name.toLowerCase() === trimmed.toLowerCase())) {
       setMemberError('This name is already added.');
@@ -95,256 +104,207 @@ export default function NewTripForm({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (dateError || nameError) return;
 
-    if (isMultiDay && formData.startDate && formData.endDate) {
-      const start = new Date(formData.startDate);
-      const end = new Date(formData.endDate);
-      if (start > end) {
-        setDateError('Please fix the dates before continuing.');
-        return;
-      }
+    // Include a name that was typed but not yet added.
+    let list = members;
+    const pending = newMemberName.trim();
+    if (pending && hasLetterOrDigit(pending) && !members.some((m) => m.name.toLowerCase() === pending.toLowerCase())) {
+      list = [...members, { id: nextId.current++, name: pending }];
+      setMembers(list);
+      setNewMemberName('');
     }
 
-    if (members.length < 2) {
+    if (list.length < 2) {
       setMemberError('Please add at least 2 members.');
       return;
     }
 
     setLoading(true);
     setMemberError('');
-    
+    setSubmitError('');
+
+    const payload = {
+      name: formData.name,
+      startDate: formData.startDate,
+      endDate: isMultiDay ? formData.endDate : formData.startDate,
+      currency: formData.currency,
+      memberNames: list.map((m) => m.name),
+    };
+
     try {
-      if (tripId) {
-        await updateTripWithMembers({
-          tripId,
-          name: formData.name,
-          startDate: formData.startDate,
-          endDate: formData.endDate,
-          currency: formData.currency,
-          memberNames: members.map(m => m.name),
-        });
-        router.push(`/wizard/${tripId}/sharing`);
-      } else {
-        const newTripId = await createTripWithMembers({
-          name: formData.name,
-          startDate: formData.startDate,
-          endDate: formData.endDate,
-          currency: formData.currency,
-          memberNames: members.map(m => m.name),
-        });
-        router.push(`/wizard/${newTripId}/sharing`);
+      const result = tripId
+        ? await updateTripWithMembers({ tripId, ...payload })
+        : await createTripWithMembers(payload);
+      if (!result.ok) {
+        setSubmitError(result.error);
+        setLoading(false);
+        return;
       }
-    } catch (err: any) {
-      console.error(err);
-      setMemberError(err.message || 'An error occurred while saving.');
+      const id = tripId ?? (result.data as string);
+      router.push(`/wizard/${id}/sharing`);
+    } catch {
+      setSubmitError('Could not save the trip. Check your connection and try again.');
       setLoading(false);
     }
   };
 
-  const canSubmit = !dateError && formData.name && formData.startDate && formData.endDate && members.length >= 2;
+  const pendingCount = newMemberName.trim() ? 1 : 0;
+  const canSubmit = !dateError && !nameError && formData.name.trim() && formData.startDate && (!isMultiDay || formData.endDate) && members.length + pendingCount >= 2;
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="grid lg:grid-cols-2 gap-4 items-start">
+      <section className={`${ui.card} p-4 sm:p-5 space-y-4`} aria-labelledby="details-heading">
+        <h2 id="details-heading" className={ui.sectionTitle}>Trip details</h2>
 
-      {/* ── TRIP DETAILS CARD ─────────────────────────────────── */}
-      <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs p-6 space-y-4">
-        <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Trip Details</h2>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Trip Name */}
-          <div className="space-y-1.5 md:col-span-2">
-            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500">Trip Name</label>
+        <div className="grid grid-cols-1 sm:grid-cols-[1fr_180px] lg:grid-cols-[1fr_210px] gap-4">
+          <div>
+            <label htmlFor="trip-name" className={ui.label}>Trip name</label>
             <input
+              id="trip-name"
               required
               type="text"
-              placeholder="e.g. Goa Trip, Team Offsite, NYE Weekend"
+              maxLength={80}
+              placeholder="e.g. Goa trip, team offsite"
               value={formData.name}
-              onChange={e => setFormData({ ...formData, name: e.target.value })}
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 placeholder-slate-400 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 transition-all"
+              onChange={(e) => { setFormData((prev) => ({ ...prev, name: e.target.value })); setSubmitError(''); }}
+              className={ui.input}
             />
+            {nameError && <p role="alert" className="text-sm text-danger mt-1">{nameError}</p>}
           </div>
-
-          {/* Currency */}
-          <div className="space-y-1.5">
-            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500">Currency</label>
+          <div>
+            <label htmlFor="trip-currency" className={ui.label}>Currency</label>
             <select
+              id="trip-currency"
               value={formData.currency}
-              onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 bg-white outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 transition-all appearance-none"
+              onChange={(e) => { setFormData((prev) => ({ ...prev, currency: e.target.value })); setSubmitError(''); }}
+              className={ui.input}
             >
-              <option value="AED">AED (Dirham)</option>
-              <option value="USD">USD (US Dollar)</option>
-              <option value="EUR">EUR (Euro)</option>
-              <option value="GBP">GBP (British Pound)</option>
-              <option value="INR">INR (Indian Rupee)</option>
-              <option value="AUD">AUD (Australian Dollar)</option>
-              <option value="CAD">CAD (Canadian Dollar)</option>
+              {CURRENCIES.map((c) => (
+                <option key={c.code} value={c.code}>{c.code} ({c.label})</option>
+              ))}
             </select>
           </div>
         </div>
 
-        {/* Multi-day Toggle */}
-        <div className="flex items-center justify-between py-2">
-          <label className="text-sm font-bold text-slate-700 cursor-pointer select-none">Multi-day trip</label>
-          <div 
-            onClick={() => setIsMultiDay(!isMultiDay)}
-            className={`w-12 h-6 rounded-full p-1 cursor-pointer transition-colors duration-300 ease-in-out ${isMultiDay ? 'bg-indigo-600' : 'bg-slate-300'}`}
+        <div className="flex items-center justify-between gap-4">
+          <span id="multi-day-label" className="text-sm font-semibold text-navy">Multi-day trip</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={isMultiDay}
+            aria-labelledby="multi-day-label"
+            onClick={toggleMultiDay}
+            className={`w-11 h-6 rounded-full p-0.5 transition-colors ${isMultiDay ? 'bg-teal' : 'bg-line-2'}`}
           >
-            <div className={`w-4 h-4 bg-white rounded-full shadow-md transform transition-transform duration-300 ease-in-out ${isMultiDay ? 'translate-x-6' : 'translate-x-0'}`} />
-          </div>
+            <span className={`block w-5 h-5 bg-white rounded-full shadow transition-transform ${isMultiDay ? 'translate-x-5' : ''}`} />
+          </button>
         </div>
 
-        {/* Dates */}
-        <div className={`grid ${isMultiDay ? 'grid-cols-2' : 'grid-cols-1'} gap-3`}>
-          <div className="space-y-1.5">
-            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500">{isMultiDay ? 'From' : 'Date'}</label>
+        <div className={`grid gap-4 ${isMultiDay ? 'grid-cols-2' : 'grid-cols-1 sm:grid-cols-2'}`}>
+          <div>
+            <label htmlFor="trip-start" className={ui.label}>{isMultiDay ? 'From' : 'Date'}</label>
             <input
+              id="trip-start"
               required
               type="date"
+              min={DATE_MIN}
+              max={DATE_MAX}
               value={formData.startDate}
-              onChange={e => setFormData({ ...formData, startDate: e.target.value })}
-              className={`w-full px-4 py-3 rounded-xl border text-sm font-bold text-slate-900 outline-none transition-all
-                ${dateError ? 'border-red-400 ring-2 ring-red-50' : 'border-slate-200 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100'}`}
+              onChange={(e) => { setStartDate(e.target.value); setSubmitError(''); }}
+              aria-invalid={!!dateError}
+              className={`${ui.input} ${dateError ? 'border-red-500' : ''}`}
             />
           </div>
           {isMultiDay && (
-            <div className="space-y-1.5">
-              <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500">To</label>
+            <div>
+              <label htmlFor="trip-end" className={ui.label}>To</label>
               <input
+                id="trip-end"
                 required
                 type="date"
-                min={formData.startDate}
+                min={formData.startDate || DATE_MIN}
+                max={DATE_MAX}
                 value={formData.endDate}
-                onChange={e => setFormData({ ...formData, endDate: e.target.value })}
-                className={`w-full px-4 py-3 rounded-xl border text-sm font-bold text-slate-900 outline-none transition-all
-                  ${dateError ? 'border-red-400 ring-2 ring-red-50' : 'border-slate-200 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100'}`}
+                onChange={(e) => { setFormData((prev) => ({ ...prev, endDate: e.target.value })); setSubmitError(''); }}
+                aria-invalid={!!dateError}
+                className={`${ui.input} ${dateError ? 'border-red-500' : ''}`}
               />
             </div>
           )}
         </div>
+        {dateError && <p role="alert" className="text-sm font-semibold text-danger">{dateError}</p>}
+      </section>
 
-        {/* Date error */}
-        {dateError && (
-          <p className="text-xs font-semibold text-red-500 flex items-center gap-1.5 pt-1">
-            <span>⚠</span> {dateError}
-          </p>
-        )}
-      </div>
-
-      {/* ── MEMBERS CARD ──────────────────────────────────────── */}
-      <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs p-6 space-y-4">
-        <div className="flex items-center justify-between pb-1">
-          <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Members</h2>
-          {members.length > 0 && (
-            <span className="text-[9px] font-black bg-indigo-50 text-indigo-600 border border-indigo-100/30 px-2.5 py-0.5 rounded-full">
-              {members.length} added
-            </span>
-          )}
+      <section className={`${ui.card} p-4 sm:p-5 space-y-3`} aria-labelledby="members-heading">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 id="members-heading" className={ui.sectionTitle}>Members</h2>
+          <span className="text-sm text-ink-2">{members.length} added</span>
         </div>
 
-        {/* Add member input */}
-        <div className="space-y-2">
-          <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500">
-            Add Participant Name
-          </label>
+        <div>
+          <label htmlFor="member-name" className={ui.label}>Add a member</label>
           <div className="flex gap-2">
             <input
+              id="member-name"
               ref={memberInputRef}
               type="text"
-              placeholder="Name or group (e.g. Raj, Team A)"
+              maxLength={40}
+              placeholder="e.g. Raj, or the Sharma family"
               value={newMemberName}
-              onChange={e => { setNewMemberName(e.target.value); setMemberError(''); }}
+              onChange={(e) => { setNewMemberName(e.target.value); setMemberError(''); setSubmitError(''); }}
               onKeyDown={handleKeyDown}
-              className="flex-1 px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 placeholder-slate-400 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 transition-all"
+              className={`${ui.input} flex-1 min-w-0`}
             />
-            <button
-              type="button"
-              onClick={addMember}
-              disabled={!newMemberName.trim()}
-              className="px-5 py-3 rounded-xl bg-indigo-600 text-white text-xs font-black uppercase tracking-wider hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all hover:shadow-lg hover:shadow-indigo-100 active:translate-y-0.5"
-            >
+            <button type="button" onClick={addMember} disabled={!newMemberName.trim()} className={ui.btnSecondary}>
               Add
             </button>
           </div>
+          <p className={ui.hint}>A member can be one person or a whole family or group. Press Enter to add several quickly.</p>
         </div>
 
-        <p className="text-[10px] text-slate-400 font-bold -mt-1">
-          💡 Press Enter to quickly add multiple members.
-        </p>
-
-        {/* Member list */}
         {members.length > 0 && (
-          <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-            {members.map(m => (
-              <div key={m.id}
-                className="flex items-center justify-between px-3.5 py-3 rounded-xl bg-slate-50/50 border border-slate-200/60 hover:bg-slate-50 transition-colors">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-6 h-6 rounded-full bg-indigo-50 border border-indigo-100/50 flex items-center justify-center text-[10px] font-black text-indigo-600 uppercase">
-                    {m.name.charAt(0)}
-                  </div>
-                  <span className="text-sm font-extrabold text-slate-800">{m.name}</span>
-                </div>
+          <ul className="flex flex-wrap gap-2" aria-label="Members">
+            {members.map((m) => (
+              <li key={m.id} className="inline-flex items-center gap-1.5 h-9 pl-1.5 pr-1 rounded-full bg-sky border border-line">
+                <Avatar name={m.name} size="sm" />
+                <span className="text-sm font-semibold text-navy max-w-[14rem] truncate">{m.name}</span>
                 <button
                   type="button"
                   onClick={() => removeMember(m.id)}
-                  className="w-7 h-7 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 flex items-center justify-center text-base font-black transition-all"
                   aria-label={`Remove ${m.name}`}
+                  className="w-7 h-7 rounded-full text-ink-3 hover:text-danger hover:bg-red-50 inline-flex items-center justify-center"
                 >
-                  ×
+                  <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
                 </button>
-              </div>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
 
-        {/* Member error */}
-        {memberError && (
-          <p className="text-xs font-semibold text-red-500 flex items-center gap-1.5 pt-1">
-            <span>⚠</span> {memberError}
-          </p>
+        {memberError && <p role="alert" className="text-sm font-semibold text-danger">{memberError}</p>}
+        {members.length < 2 && !memberError && (
+          <p className="text-sm text-ink-2">Add at least 2 members to continue.</p>
         )}
+      </section>
 
-        {/* Hint when empty */}
-        {members.length === 0 && (
-          <p className="text-xs text-slate-400 font-medium text-center py-2">
-            Add at least 2 members to continue.
-          </p>
-        )}
       </div>
 
-      {/* ── ACTIONS ────────────────────────────────────────────── */}
-      <div className="space-y-2.5 pt-2">
-        <button
-          type="submit"
-          disabled={!canSubmit || loading}
-          className={`w-full py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all
-            ${canSubmit && !loading
-              ? 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-100 hover:-translate-y-0.5 cursor-pointer active:translate-y-0'
-              : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-            }`}
-        >
-          {loading ? (
-            <span className="flex items-center justify-center gap-2">
-              <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-              </svg>
-              {tripId ? 'Updating trip...' : 'Creating trip...'}
-            </span>
-          ) : (
-            'Continue to Expenses & Sharing →'
-          )}
-        </button>
+      {submitError && (
+        <p role="alert" className="text-sm font-semibold text-danger bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+          {submitError}
+        </p>
+      )}
 
-        <button
-          type="button"
-          onClick={() => router.back()}
-          className="w-full py-3 text-slate-400 text-sm font-bold hover:text-slate-600 transition-colors"
-        >
+      <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-1">
+        <button type="button" onClick={() => router.back()} className={ui.btnGhost}>
           Cancel
         </button>
+        <button type="submit" disabled={!canSubmit || loading} className={ui.btnPrimary}>
+          {loading ? (tripId ? 'Saving…' : 'Creating trip…') : tripId ? 'Save and continue to expenses' : 'Continue to expenses'}
+        </button>
       </div>
-
     </form>
   );
 }

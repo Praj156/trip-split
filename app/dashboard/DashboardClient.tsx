@@ -2,174 +2,137 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { Avatar, StatusBadge, ui } from '@/app/components/ui';
 
-type Trip = any; // We can use the Prisma types, but this is fine for now
+export interface DashboardTrip {
+  id: string;
+  name: string;
+  status: string;
+  currency: string;
+  startDate: string | null;
+  endDate: string | null;
+  members: { id: string; name: string }[];
+  total: number;
+  expenseCount: number;
+}
 
-export default function DashboardClient({ trips }: { trips: Trip[] }) {
-  const [tab, setTab] = useState<'active' | 'past'>('active');
+const fmtDate = (iso: string, withYear = true) =>
+  new Date(iso).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    ...(withYear ? { year: 'numeric' } : {}),
+    timeZone: 'UTC',
+  });
 
-  const activeTrips = trips.filter((t) => t.status === 'active');
-  // Treat legacy 'settled' status as 'completed' so past trips remain visible
-  const pastTrips = trips.filter((t) => t.status === 'completed' || t.status === 'settled');
+function dateRange(start: string | null, end: string | null) {
+  if (!start) return 'No dates';
+  if (!end || end === start) return fmtDate(start);
+  const sameYear = start.slice(0, 4) === end.slice(0, 4);
+  return `${fmtDate(start, !sameYear)} – ${fmtDate(end)}`;
+}
 
-  const displayedTrips = tab === 'active' ? activeTrips : pastTrips;
+// Each trip gets a cover colour, picked from its id so it never changes.
+const COVERS = [
+  { bg: 'bg-navy', text: 'text-white', sub: 'text-[#d7e2ec]' },
+  { bg: 'bg-teal', text: 'text-white', sub: 'text-[#d4f1ee]' },
+  { bg: 'bg-sunset', text: 'text-navy', sub: 'text-navy/80' },
+  { bg: 'bg-peach', text: 'text-navy', sub: 'text-navy/80' },
+];
+const coverFor = (id: string) => COVERS[[...id].reduce((a, c) => a + c.charCodeAt(0), 0) % COVERS.length];
+
+export default function DashboardClient({ trips }: { trips: DashboardTrip[] }) {
+  const isDone = (t: DashboardTrip) => t.status === 'completed' || t.status === 'settled';
+  const active = trips.filter((t) => !isDone(t));
+  const past = trips.filter(isDone);
+  const [tab, setTab] = useState<'active' | 'past'>(active.length === 0 && past.length > 0 ? 'past' : 'active');
+  const shown = tab === 'active' ? active : past;
 
   return (
-    <div className="space-y-6">
-      {/* ── Trips Header & Tabs ──────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-black text-slate-900 tracking-tight">My Trips</h2>
-          <div className="flex gap-4 mt-2">
-            <button
-              onClick={() => setTab('active')}
-              className={`text-sm font-bold pb-1 border-b-2 transition-all ${
-                tab === 'active' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-400 hover:text-slate-600'
-              }`}
-            >
-              Active ({activeTrips.length})
-            </button>
-            <button
-              onClick={() => setTab('past')}
-              className={`text-sm font-bold pb-1 border-b-2 transition-all ${
-                tab === 'past' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-400 hover:text-slate-600'
-              }`}
-            >
-              Past / Completed ({pastTrips.length})
-            </button>
-          </div>
-        </div>
-        <Link
-          href="/wizard"
-          className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-3 rounded-2xl text-sm font-bold transition-all shadow-lg shadow-indigo-200 hover:-translate-y-0.5 cursor-pointer"
-        >
-          <span className="text-base leading-none">+</span>
-          Plan New Trip
-        </Link>
+    <div className="space-y-5">
+      <div role="tablist" aria-label="Trips" className="inline-flex gap-1 p-1 rounded-full bg-white border border-line">
+        {(
+          [
+            ['active', `Active (${active.length})`],
+            ['past', `Completed (${past.length})`],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            role="tab"
+            type="button"
+            aria-selected={tab === key}
+            onClick={() => setTab(key)}
+            className={`h-9 px-4 rounded-full text-sm font-bold transition-colors ${
+              tab === key ? 'bg-peach text-navy' : 'text-ink-2 hover:text-navy'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
-      {/* ── Trips Grid / List ──────────────────────────────────── */}
-      {displayedTrips.length > 0 ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {displayedTrips.map((trip) => {
-            const start = trip.startDate ? new Date(trip.startDate) : new Date();
-            const end = trip.endDate ? new Date(trip.endDate) : new Date();
-            const nights = trip.startDate && trip.endDate
-              ? Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
-              : 0;
-            const duration = nights === 0 ? '1 day' : `${nights + 1} days`;
-            const dateStr = trip.startDate
-              ? start.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-              : 'N/A';
-
-            // Calculate total trip spending
-            const totalTripSpent = trip.members.reduce((mSum: number, m: any) => {
-              return mSum + m.expenses.reduce((eSum: number, e: any) => eSum + e.amount, 0);
-            }, 0);
-
+      {shown.length > 0 ? (
+        <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {shown.map((trip) => {
+            const cover = coverFor(trip.id);
+            const done = isDone(trip);
             return (
-              <Link
-                key={trip.id}
-                href={`/wizard/${trip.id}/summary`}
-                className="group relative bg-white rounded-3xl border border-slate-200/80 p-6 shadow-sm hover:border-indigo-400 hover:shadow-md transition-all flex flex-col justify-between h-[210px] overflow-hidden"
-              >
-                {/* Visual Accent */}
-                <div className={`absolute top-0 left-0 w-full h-1.5 transition-opacity ${
-                  trip.status === 'active' 
-                    ? 'bg-linear-to-r from-indigo-500 to-blue-500 opacity-0 group-hover:opacity-100'
-                    : 'bg-slate-300 opacity-100'
-                }`} />
-
-                <div>
-                  {/* Card top */}
-                  <div className="flex items-start justify-between mb-4">
-                    <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-lg border group-hover:scale-105 transition-transform ${
-                      trip.status === 'active' ? 'bg-linear-to-tr from-indigo-50 to-blue-50 border-indigo-100/50' : 'bg-slate-50 border-slate-200'
-                    }`}>
-                      {trip.status === 'active' ? '🌴' : '✅'}
+              <li key={trip.id}>
+                <Link
+                  href={`/wizard/${trip.id}/summary`}
+                  className="group block h-full rounded-[20px] bg-white border border-line overflow-hidden hover:shadow-[0_16px_32px_-20px_rgba(19,50,74,0.45)] hover:-translate-y-0.5 transition-[box-shadow,transform]"
+                >
+                  <div className={`${done ? 'bg-[#e9eef4] text-navy' : `${cover.bg} ${cover.text}`} px-5 pt-4 pb-5 relative`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <h2 className="font-display text-xl font-bold leading-tight break-words">{trip.name}</h2>
+                      {done && <StatusBadge status="completed" />}
                     </div>
-                    <div className="flex gap-1.5">
-                      {trip.status !== 'active' && (
-                         <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200">
-                           {trip.status}
-                         </span>
-                      )}
-                      <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-full border border-indigo-100/20">
-                        {duration}
-                      </span>
+                    <p className={`text-sm mt-1 ${done ? 'text-ink-2' : cover.sub}`}>{dateRange(trip.startDate, trip.endDate)}</p>
+                    {/* the road: a dashed line ending in a stop */}
+                    <svg aria-hidden="true" viewBox="0 0 300 16" preserveAspectRatio="none" className="absolute left-0 right-0 -bottom-px w-full h-4 opacity-60">
+                      <path d="M0 12 C 60 2, 120 16, 180 8 S 270 4, 300 10" stroke="currentColor" strokeWidth="1.5" strokeDasharray="5 6" fill="none" />
+                    </svg>
+                  </div>
+                  <div className="px-5 py-4 flex items-end justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex -space-x-2">
+                        {trip.members.slice(0, 5).map((m) => (
+                          <span key={m.id} className="rounded-full ring-2 ring-white">
+                            <Avatar name={m.name} size="sm" />
+                          </span>
+                        ))}
+                      </div>
+                      <p className="text-sm text-ink-2 mt-1.5">
+                        {trip.members.length} {trip.members.length === 1 ? 'member' : 'members'}, {trip.expenseCount}{' '}
+                        {trip.expenseCount === 1 ? 'expense' : 'expenses'}
+                      </p>
                     </div>
+                    <p className="font-display text-xl font-bold text-navy whitespace-nowrap">
+                      {trip.total.toLocaleString('en-US', { maximumFractionDigits: 0 })}{' '}
+                      <span className="text-sm font-semibold text-ink-2">{trip.currency}</span>
+                    </p>
                   </div>
-
-                  {/* Trip name */}
-                  <h3 className={`font-black text-lg mb-1 transition-colors leading-tight ${
-                    trip.status === 'active' ? 'text-slate-800 group-hover:text-indigo-600' : 'text-slate-600'
-                  }`}>
-                    {trip.name}
-                  </h3>
-                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">{dateStr}</p>
-                </div>
-
-                {/* Card bottom */}
-                <div className="border-t border-slate-100 pt-4 flex items-center justify-between mt-auto">
-                  {/* Members Avatars */}
-                  <div className="flex items-center gap-1.5">
-                    <div className="flex -space-x-1.5">
-                      {trip.members.slice(0, 3).map((m: any) => (
-                        <div key={m.id}
-                          className={`w-6 h-6 rounded-full border-2 border-white flex items-center justify-center text-[9px] font-black shadow-sm uppercase ${
-                            trip.status === 'active' ? 'bg-linear-to-br from-indigo-500 to-blue-600 text-white' : 'bg-slate-300 text-slate-600'
-                          }`}>
-                          {m.name.charAt(0)}
-                        </div>
-                      ))}
-                      {trip._count?.members > 3 && (
-                        <div className="w-6 h-6 rounded-full bg-slate-100 border-2 border-white flex items-center justify-center text-[8px] font-black text-slate-500 shadow-sm">
-                          +{trip._count.members - 3}
-                        </div>
-                      )}
-                    </div>
-                    <span className="text-xs text-slate-500 font-medium">
-                      {trip._count?.members || trip.members.length} family{trip._count?.members !== 1 ? 'ies' : ''}
-                    </span>
-                  </div>
-
-                  {/* Cost Badge */}
-                  <div className="text-right">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">Cost</span>
-                    <span className={`text-sm font-black transition-colors ${
-                      trip.status === 'active' ? 'text-slate-900 group-hover:text-indigo-600' : 'text-slate-500'
-                    }`}>
-                      {totalTripSpent.toLocaleString('en-US', { maximumFractionDigits: 0 })} {trip.currency || 'AED'}
-                    </span>
-                  </div>
-                </div>
-              </Link>
+                </Link>
+              </li>
             );
           })}
-        </div>
+        </ul>
       ) : (
-        /* ── Empty State ─────────────────────────────────────── */
-        <div className="bg-white rounded-3xl border-2 border-dashed border-slate-200/80 p-12 text-center max-w-xl mx-auto space-y-6">
-          <div className="w-16 h-16 rounded-3xl flex items-center justify-center text-3xl mx-auto bg-linear-to-tr from-indigo-50 to-blue-50 border border-indigo-100/50 shadow-sm animate-bounce duration-1000">
-            🧭
-          </div>
-          <div className="space-y-2">
-            <h3 className="font-black text-slate-900 text-lg">
-              {tab === 'active' ? 'No active trips' : 'No past trips'}
-            </h3>
-            <p className="text-slate-500 text-sm font-medium max-w-sm mx-auto leading-relaxed">
-              {tab === 'active' 
-                ? 'Create your first shared trip, add your families, input expenses, and calculate who owes what in seconds.'
-                : 'Trips you mark as completed will appear here.'}
-            </p>
-          </div>
+        <div className={`${ui.card} px-6 py-10 text-center`}>
+          <svg aria-hidden="true" viewBox="0 0 200 40" className="w-48 h-10 mx-auto text-line-2">
+            <path d="M5 30 C 50 5, 80 38, 120 20 S 175 8, 195 18" stroke="currentColor" strokeWidth="3" strokeDasharray="7 8" fill="none" strokeLinecap="round" />
+            <circle cx="5" cy="30" r="5" fill="#7fd6cf" />
+            <circle cx="195" cy="18" r="5" fill="#ff9b5c" />
+          </svg>
+          <h2 className="font-display text-xl font-bold text-navy mt-3">{tab === 'active' ? 'No active trips' : 'No completed trips yet'}</h2>
+          <p className="text-[0.9375rem] text-ink-2 mt-1 max-w-sm mx-auto">
+            {tab === 'active'
+              ? 'Start a trip, add the members, and log what everyone paid. TripSplit works out who owes whom.'
+              : 'When everyone has paid up, mark a trip as completed and it moves here.'}
+          </p>
           {tab === 'active' && (
-            <Link
-              href="/wizard"
-              className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3.5 rounded-2xl font-bold text-sm hover:shadow-lg shadow-indigo-100 transition-all cursor-pointer"
-            >
-              <span className="text-base leading-none">+</span>
-              Create Your First Trip
+            <Link href="/wizard" className={`${ui.btnPrimary} mt-5`}>
+              Create your first trip
             </Link>
           )}
         </div>

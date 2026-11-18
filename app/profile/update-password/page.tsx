@@ -1,9 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { ui } from '@/app/components/ui';
+import { passwordProblem } from '@/lib/validation';
+import { PasswordRules } from '@/app/components/PasswordRules';
 
 export default function UpdatePasswordPage() {
   const [currentPassword, setCurrentPassword] = useState('');
@@ -21,12 +24,21 @@ export default function UpdatePasswordPage() {
     setError('');
     setMessage('');
 
-    if (newPassword !== confirmPassword) {
-      setError('New passwords do not match');
+    if (!currentPassword) {
+      setError('Enter your current password.');
       return;
     }
-    if (newPassword.length < 6) {
-      setError('New password must be at least 6 characters');
+    const problem = passwordProblem(newPassword);
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    if (newPassword === currentPassword) {
+      setError('Choose a new password that is different from your current one.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError('The two new passwords don’t match.');
       return;
     }
 
@@ -69,75 +81,47 @@ export default function UpdatePasswordPage() {
       setMessage('Password updated. Please sign in with your new password.');
       setLoading(false);
       router.push('/sign-in');
-    } catch (err) {
+    } catch {
       setError('An unexpected error occurred.');
       setLoading(false);
     }
   };
 
   return (
-    <div className="max-w-xl mx-auto px-6 py-10 space-y-6">
-      <div className="space-y-2">
-        <h1 className="text-3xl md:text-4xl font-black tracking-tight text-slate-900">
-          Update Password
-        </h1>
-        <p className="text-sm text-slate-500 font-medium">For security, please verify your current password before changing it.</p>
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+    <div className="max-w-md space-y-5">
+      <div>
+        <Link href="/profile" className="inline-flex items-center gap-1 text-sm font-semibold text-teal hover:underline">
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M8.5 3L4.5 7l4 4" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          Profile
+        </Link>
+        <h1 className={`${ui.pageTitle} mt-2`}>Change password</h1>
+        <p className="text-sm text-ink-2 mt-1">Confirm your current password, then choose a new one.</p>
+      </div>
+
+      <form onSubmit={handleSubmit} noValidate className={`${ui.card} p-4 sm:p-5 space-y-4`}>
         <div>
-          <Link href="/profile" className="text-xs font-bold text-indigo-600 hover:underline">
-            ← Back to Profile Settings
-          </Link>
+          <label htmlFor="current-password" className={ui.label}>Current password</label>
+          <input id="current-password" required type="password" autoComplete="current-password" value={currentPassword} onChange={(e) => { setCurrentPassword(e.target.value); setError(''); }} className={ui.input} />
         </div>
-      </div>
+        <div>
+          <label htmlFor="new-password" className={ui.label}>New password</label>
+          <input id="new-password" required type="password" autoComplete="new-password" maxLength={72} value={newPassword} onChange={(e) => { setNewPassword(e.target.value); setError(''); }} className={ui.input} aria-describedby="password-rules" />
+          <PasswordRules value={newPassword} id="password-rules" />
+        </div>
+        <div>
+          <label htmlFor="confirm-password" className={ui.label}>Confirm new password</label>
+          <input id="confirm-password" required type="password" autoComplete="new-password" value={confirmPassword} onChange={(e) => { setConfirmPassword(e.target.value); setError(''); }} className={ui.input} />
+        </div>
 
-      <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs p-6 space-y-6">
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-1.5">
-            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500">Current Password</label>
-            <input
-              required
-              type="password"
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 placeholder-slate-400 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 transition-all"
-            />
-          </div>
+        {error && <p role="alert" className="text-sm font-semibold text-danger">{error}</p>}
+        {message && <p className="text-sm font-semibold text-teal">{message}</p>}
 
-          <div className="space-y-1.5">
-            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500">New Password</label>
-            <input
-              required
-              type="password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 placeholder-slate-400 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 transition-all"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500">Confirm New Password</label>
-            <input
-              required
-              type="password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 placeholder-slate-400 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 transition-all"
-            />
-          </div>
-
-          {error && <p className="text-xs font-semibold text-red-500">{error}</p>}
-          {message && <p className="text-xs font-semibold text-green-600">{message}</p>}
-
-          <div className="pt-2">
-            <button
-              type="submit"
-              disabled={loading}
-              className="px-6 py-3 rounded-xl bg-indigo-600 text-white text-xs font-black uppercase tracking-wider hover:bg-indigo-700 disabled:opacity-50 transition-all"
-            >
-              {loading ? 'Updating...' : 'Update Password'}
-            </button>
-          </div>
-        </form>
-      </div>
+        <button type="submit" disabled={loading} className={`${ui.btnPrimary} w-full`}>
+          {loading ? 'Updating…' : 'Update password'}
+        </button>
+      </form>
+    </div>
     </div>
   );
 }

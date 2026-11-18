@@ -1,32 +1,50 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import "./globals.css";
+import type { Metadata, Viewport } from 'next';
+import localFont from 'next/font/local';
+import './globals.css';
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+// Self-hosted so builds never depend on reaching Google Fonts.
+const body = localFont({
+  src: './fonts/Figtree.woff2',
+  variable: '--font-body',
+  weight: '300 900',
+  display: 'swap',
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+const display = localFont({
+  src: './fonts/Gabarito.woff2',
+  variable: '--font-display-face',
+  weight: '400 900',
+  display: 'swap',
 });
+
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
 
 export const metadata: Metadata = {
-  title: "TripSplit",
-  description: "Split expenses on your trips",
+  metadataBase: new URL(siteUrl),
+  title: {
+    default: 'TripSplit — split group trip expenses',
+    template: '%s · TripSplit',
+  },
+  description:
+    'Log who paid and who shared each cost on a group trip. TripSplit works out the fewest payments to settle up.',
+  applicationName: 'TripSplit',
+  openGraph: {
+    title: 'TripSplit',
+    description: 'Everyone paid for something. TripSplit works out who pays whom.',
+    type: 'website',
+    siteName: 'TripSplit',
+  },
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export const viewport: Viewport = {
+  themeColor: '#13324a',
+  width: 'device-width',
+  initialScale: 1,
+};
+
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
+    <html lang="en" className={`${body.variable} ${display.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );

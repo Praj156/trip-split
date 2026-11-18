@@ -1,8 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { createClient } from '@/lib/supabase/client';
+import { passwordProblem } from '@/lib/validation';
+import { PasswordRules } from '@/app/components/PasswordRules';
+import { AuthCard, FormMessage, inputClass, labelClass, linkClass, primaryButtonClass } from '@/app/components/AuthCard';
 
 export default function ResetPasswordPage() {
   const [showForm, setShowForm] = useState(false);
@@ -12,137 +16,82 @@ export default function ResetPasswordPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
-  const supabase = createClient();
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const url = new URL(window.location.href);
-      if (url.searchParams.has('code') || url.hash.includes('type=recovery')) {
-        setShowForm(true);
-      }
-    }
+    const supabase = createClient();
+    const url = new URL(window.location.href);
+    const fromEmailLink = url.searchParams.has('code') || url.hash.includes('type=recovery');
 
-    const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        setShowForm(true);
-      }
-    };
-    
-    checkSession();
-
-    const { data } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN' || session) {
-        setShowForm(true);
-      }
+    // The browser client exchanges the link's code for a session on load.
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session || fromEmailLink) setShowForm(true);
     });
 
-    return () => {
-      try {
-        data.subscription.unsubscribe();
-      } catch (e) {}
-    };
-  }, [supabase]);
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY' || session) setShowForm(true);
+    });
+    return () => data.subscription.unsubscribe();
+  }, []);
 
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-
-    if (password !== confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
-
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters');
-      return;
-    }
+    const problem = passwordProblem(password);
+    if (problem) return setError(problem);
+    if (password !== confirmPassword) return setError('The two passwords don’t match.');
 
     setLoading(true);
-
     try {
-      const { data, error } = await supabase.auth.updateUser({ password });
-
+      const supabase = createClient();
+      const { error } = await supabase.auth.updateUser({ password });
       if (error) {
-        setError(error.message);
+        setError(
+          error.code === 'same_password'
+            ? 'Choose a password different from your current one.'
+            : error.message.includes('session')
+              ? 'This reset link has expired. Request a new one.'
+              : error.message,
+        );
+        setLoading(false);
         return;
       }
-
-      // Sign the user out so they are forced to log in with their new password
+      // Sign out so the new password is used from here on.
       await supabase.auth.signOut();
-
-      setMessage('Password updated successfully. You can now sign in.');
+      setMessage('Password updated. Taking you to sign in…');
       setTimeout(() => router.push('/sign-in'), 1500);
-    } catch (err) {
-      setError('An unexpected error occurred');
-    } finally {
+    } catch {
+      setError('Could not reach the server. Check your connection and try again.');
       setLoading(false);
     }
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-slate-50">
-      <div className="shadow-2xl border border-slate-200 rounded-2xl bg-white p-8 w-full max-w-md">
-        <h1 className="text-gray-900 font-black text-2xl mb-2">Reset Password</h1>
-
-        {!showForm ? (
-          <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800 text-sm">
-            Open the password reset link we sent to your email. If you followed the link, the page will show a form to set a new password.
+    <AuthCard
+      title="Choose a new password"
+      footer={<Link href="/forgot-password" className={linkClass}>Request a new reset link</Link>}
+    >
+      {!showForm ? (
+        <FormMessage kind="info">
+          Open the reset link from your email to set a new password. Links expire after a short time.
+        </FormMessage>
+      ) : (
+        <form onSubmit={handleUpdate} className="space-y-4">
+          <div>
+            <label htmlFor="password" className={labelClass}>New password</label>
+            <input id="password" type="password" autoComplete="new-password" maxLength={72} value={password} onChange={(e) => { setPassword(e.target.value); setError(null); }} required className={inputClass} aria-describedby="password-rules" />
+            <PasswordRules value={password} id="password-rules" />
           </div>
-        ) : (
-          <form onSubmit={handleUpdate} className="space-y-4">
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-                New password
-              </label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                required
-                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">
-                Confirm password
-              </label>
-              <input
-                id="confirmPassword"
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="••••••••"
-                required
-                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
-              />
-            </div>
-
-            {error && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">
-                {error}
-              </div>
-            )}
-
-            {message && (
-              <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-green-800 text-sm">
-                {message}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded-lg text-sm normal-case disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {loading ? 'Updating...' : 'Update password'}
-            </button>
-          </form>
-        )}
-      </div>
-    </div>
+          <div>
+            <label htmlFor="confirmPassword" className={labelClass}>Confirm new password</label>
+            <input id="confirmPassword" type="password" autoComplete="new-password" value={confirmPassword} onChange={(e) => { setConfirmPassword(e.target.value); setError(null); }} required className={inputClass} />
+          </div>
+          {error && <FormMessage kind="error">{error}</FormMessage>}
+          {message && <FormMessage kind="success">{message}</FormMessage>}
+          <button type="submit" disabled={loading || !!message} className={primaryButtonClass}>
+            {loading ? 'Updating…' : 'Update password'}
+          </button>
+        </form>
+      )}
+    </AuthCard>
   );
 }

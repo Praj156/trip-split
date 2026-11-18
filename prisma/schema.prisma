@@ -37,6 +37,8 @@ model Member {
   name      String
   tripId    String    @db.Uuid
   trip      Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  /// Secret for the member's personal link (/m/<token>). Null until the owner shares it.
+  shareToken String?  @unique
   createdAt DateTime  @default(now())
   payments  Payment[] @relation("PaymentFrom")
   paymentsReceived Payment[] @relation("PaymentTo")

@@ -1,8 +1,11 @@
-import { checkUser } from '../actions/user';
-import { db } from '@/lib/db';
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
+import { checkUser } from '@/lib/auth';
+import { db } from '@/lib/db';
+import { ui } from '@/app/components/ui';
 import DashboardClient from './DashboardClient';
+
+export const metadata = { title: 'My trips' };
 
 export default async function DashboardPage() {
   const user = await checkUser();
@@ -10,52 +13,44 @@ export default async function DashboardPage() {
 
   const trips = await db.trip.findMany({
     where: { userId: user.id },
-    orderBy: { startDate: 'desc' },
+    orderBy: [{ startDate: 'desc' }, { createdAt: 'desc' }],
     include: {
-      members: {
-        include: {
-          expenses: {
-            select: { amount: true }
-          }
-        }
-      },
-      _count: { select: { members: true } },
+      members: { select: { id: true, name: true, expenses: { select: { amount: true } } } },
     },
   });
 
+  const firstName = user.name?.split(' ')[0];
+
   return (
-    <div className="max-w-5xl mx-auto px-6 py-10 space-y-10">
-
-      {/* ── Welcome Banner ─────────────────────────────────────── */}
-      <div className="relative overflow-hidden rounded-3xl bg-linear-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-8 md:p-10 shadow-xl border border-slate-800">
-        <div className="absolute inset-0 pointer-events-none overflow-hidden">
-          <div className="absolute top-[-30%] right-[-10%] w-[350px] h-[350px] bg-blue-500/10 rounded-full blur-[80px]" />
-          <div className="absolute bottom-[-30%] left-[-10%] w-[300px] h-[300px] bg-teal-400/10 rounded-full blur-[80px]" />
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className={ui.pageTitle}>{firstName ? `Hi ${firstName}` : 'Your trips'}</h1>
+          <p className="text-[0.9375rem] text-ink-2 mt-1.5">
+            {trips.length === 0
+              ? 'Create a trip, add who’s going, and send everyone their link.'
+              : 'Open a trip to add expenses or see who owes whom.'}
+          </p>
         </div>
-
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-2">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-              ✈️ Expense Dashboard
-            </span>
-            <h1 className="text-3xl md:text-4xl font-black tracking-tight">
-              Hey, welcome back!
-            </h1>
-            <p className="text-sm text-slate-300 font-medium max-w-md">
-              Keep your group expenses fair, transparent, and easy to settle. Let's start splitting.
-            </p>
-          </div>
-
-          <div className="flex gap-4 md:gap-8 bg-slate-800/40 backdrop-blur-sm border border-slate-700/50 p-5 rounded-2xl">
-            <div className="text-left">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Trips</p>
-              <p className="text-3xl font-black text-white mt-0.5">{trips.length}</p>
-            </div>
-          </div>
-        </div>
+        <Link href="/wizard" className={ui.btnDark}>
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M7 1.5v11M1.5 7h11" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
+          New trip
+        </Link>
       </div>
 
-      <DashboardClient trips={trips} />
+      <DashboardClient
+        trips={trips.map((t) => ({
+          id: t.id,
+          name: t.name,
+          status: t.status,
+          currency: t.currency,
+          startDate: t.startDate?.toISOString() ?? null,
+          endDate: t.endDate?.toISOString() ?? null,
+          members: t.members.map((m) => ({ id: m.id, name: m.name })),
+          total: t.members.reduce((s, m) => s + m.expenses.reduce((x, e) => x + e.amount, 0), 0),
+          expenseCount: t.members.reduce((s, m) => s + m.expenses.length, 0),
+        }))}
+      />
     </div>
   );
 }

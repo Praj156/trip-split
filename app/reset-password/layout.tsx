@@ -1,9 +1,6 @@
 export const dynamic = 'force-dynamic';
+export const metadata = { title: 'Choose a new password' };
 
-export default function ResetPasswordLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function Layout({ children }: { children: React.ReactNode }) {
   return children;
 }

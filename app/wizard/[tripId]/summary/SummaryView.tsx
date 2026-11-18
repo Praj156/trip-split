@@ -2,7 +2,11 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { updateTripStatus, deleteTrip } from '../../../actions/trip';
+import { updateTripStatus, deleteTrip } from '@/app/actions/trip';
+import Link from 'next/link';
+import { computeBalances, computeSettlements, effectiveSharers, formatMoney } from '@/lib/settlement';
+import { Avatar, StatusBadge, ui } from '@/app/components/ui';
+import { ConfirmDialog } from '@/app/components/ConfirmDialog';
 
 interface SerializedExpense {
   id: string;
@@ -28,461 +32,455 @@ interface SerializedTrip {
   members: SerializedMember[];
 }
 
-export default function SummaryView({ trip }: { trip: SerializedTrip }) {
+export default function SummaryView({
+  trip,
+  viewer = 'owner',
+  editHref,
+  footer,
+  layout = 'page',
+}: {
+  trip: SerializedTrip;
+  /** Members (via their link) get a read-only view. */
+  viewer?: 'owner' | 'member';
+  /** Where the "Edit expenses" button goes; hidden when omitted. */
+  editHref?: string;
+  /** Extra owner content shown with the actions (e.g. member links). */
+  footer?: React.ReactNode;
+  /** 'page' uses a sidebar on wide screens; 'embedded' is a single column. */
+  layout?: 'page' | 'embedded';
+}) {
+  const isOwner = viewer === 'owner';
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<'settlements' | 'ledger' | 'stats'>('settlements');
   const [copied, setCopied] = useState(false);
+  const [dialog, setDialog] = useState<null | 'complete' | 'reopen' | 'delete'>(null);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState('');
 
-  const [statusUpdating, setStatusUpdating] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const isActive = trip.status === 'active';
+  const cur = trip.currency;
+  const money = (n: number) => formatMoney(n, cur);
 
-  const handleStatusChange = async (newStatus: string) => {
-    setStatusUpdating(true);
-    await updateTripStatus(trip.id, newStatus);
+  const changeStatus = async (status: 'active' | 'completed') => {
+    setBusy(true);
+    setActionError('');
+    const res = await updateTripStatus(trip.id, status).catch(() => null);
+    setBusy(false);
+    setDialog(null);
+    if (!res?.ok) setActionError(res?.error ?? 'Could not update the trip. Try again.');
     router.refresh();
-    setStatusUpdating(false);
   };
 
   const handleDeleteTrip = async () => {
-    if (confirm("Are you sure you want to delete this trip? This action cannot be undone.")) {
-      setIsDeleting(true);
-      await deleteTrip(trip.id);
+    setBusy(true);
+    const res = await deleteTrip(trip.id).catch(() => null);
+    if (res?.ok) {
       router.push('/dashboard');
+      router.refresh();
+    } else {
+      setBusy(false);
+      setDialog(null);
+      setActionError(res?.error ?? 'Could not delete the trip. Try again.');
     }
   };
 
-  // 1. Calculate stats
-  const totalTripExpense = trip.members.reduce((acc, m) =>
-    acc + m.expenses.reduce((sum, e) => sum + e.amount, 0), 0
+  // Totals, balances and the transfers that settle them (see lib/settlement.ts)
+  const totalTripExpense = trip.members.reduce((acc, m) => acc + m.expenses.reduce((sum, e) => sum + e.amount, 0), 0);
+  const perMember = totalTripExpense / (trip.members.length || 1);
+  const flatExpenses = trip.members.flatMap((m) =>
+    m.expenses.map((e) => ({ amount: e.amount, paidById: m.id, sharedWithIds: e.sharedWithIds })),
   );
+  const balances = computeBalances(trip.members, flatExpenses);
+  const settlements = computeSettlements(trip.members, balances);
+  const memberIds = new Set(trip.members.map((m) => m.id));
 
-  const averagePerFamily = totalTripExpense / (trip.members.length || 1);
+  const allExpenses = trip.members
+    .flatMap((m) =>
+      m.expenses.map((e) => ({
+        id: e.id,
+        description: e.description || '',
+        amount: e.amount,
+        paidBy: m.name,
+        date: new Date(e.date),
+        sharedWith: effectiveSharers({ amount: e.amount, paidById: m.id, sharedWithIds: e.sharedWithIds }, memberIds).map(
+          (id) => trip.members.find((member) => member.id === id)?.name ?? 'Unknown',
+        ),
+      })),
+    )
+    .sort((a, b) => b.date.getTime() - a.date.getTime());
 
-  // 2. Calculate Net Balances
-  const balances: { [memberId: string]: number } = {};
-  trip.members.forEach(m => balances[m.id] = 0);
+  const fmt = (iso: string) =>
+    new Date(iso).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  const dateLabel = trip.startDate
+    ? trip.endDate && trip.endDate !== trip.startDate
+      ? `${fmt(trip.startDate)} – ${fmt(trip.endDate)}`
+      : fmt(trip.startDate)
+    : '';
 
-  trip.members.forEach(member => {
-    member.expenses.forEach(expense => {
-      // The person who paid gets a credit
-      balances[member.id] += expense.amount;
+  // Compact range for the trip card, e.g. "Sep 29 – Oct 1, 2026".
+  const cardDate = (() => {
+    if (!trip.startDate) return '';
+    const s = new Date(trip.startDate);
+    const e = trip.endDate ? new Date(trip.endDate) : s;
+    const md = (d: Date) => d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+    const y = (d: Date) => d.getUTCFullYear();
+    if (trip.endDate === trip.startDate || !trip.endDate) return fmt(trip.startDate);
+    return y(s) === y(e) ? `${md(s)} – ${md(e)}, ${y(e)}` : `${fmt(trip.startDate)} – ${fmt(trip.endDate)}`;
+  })();
 
-      // The cost is split among everyone in sharedWithIds
-      if (expense.sharedWithIds.length > 0) {
-        const splitAmount = expense.amount / expense.sharedWithIds.length;
-        expense.sharedWithIds.forEach(id => {
-          balances[id] -= splitAmount;
-        });
-      }
-    });
-  });
-
-  // 3. Settlement Algorithm (Who pays whom)
-  const debtors: { id: string; name: string; amount: number }[] = [];
-  const creditors: { id: string; name: string; amount: number }[] = [];
-
-  Object.entries(balances).forEach(([id, balance]) => {
-    const name = trip.members.find(m => m.id === id)?.name || "Unknown";
-    if (balance < -0.01) debtors.push({ id, name, amount: Math.abs(balance) });
-    else if (balance > 0.01) creditors.push({ id, name, amount: balance });
-  });
-
-  const settlements: { from: string; to: string; amount: number }[] = [];
-  let dIdx = 0;
-  let cIdx = 0;
-
-  // Make a copy of amounts to avoid mutating state values
-  const workingDebtors = debtors.map(d => ({ ...d }));
-  const workingCreditors = creditors.map(c => ({ ...c }));
-
-  while (dIdx < workingDebtors.length && cIdx < workingCreditors.length) {
-    const payment = Math.min(workingDebtors[dIdx].amount, workingCreditors[cIdx].amount);
-    settlements.push({
-      from: workingDebtors[dIdx].name,
-      to: workingCreditors[cIdx].name,
-      amount: payment
-    });
-
-    workingDebtors[dIdx].amount -= payment;
-    workingCreditors[cIdx].amount -= payment;
-
-    if (workingDebtors[dIdx].amount < 0.01) dIdx++;
-    if (workingCreditors[cIdx].amount < 0.01) cIdx++;
-  }
-
-  // 4. Flatten all expenses for ledger
-  const allExpenses = trip.members.flatMap(m =>
-    m.expenses.map(e => ({
-      id: e.id,
-      description: e.description || 'General Expense',
-      amount: e.amount,
-      paidBy: m.name,
-      paidById: m.id,
-      date: new Date(e.date),
-      sharedWith: e.sharedWithIds.map(id => trip.members.find(member => member.id === id)?.name || "Unknown")
-    }))
-  ).sort((a, b) => b.date.getTime() - a.date.getTime());
-
-  // 5. Handle Copy Summary to Clipboard
   const handleCopySummary = () => {
+    // Original TripSplit WhatsApp format (emojis included).
     let report = `✈️ TRIP SPLIT SUMMARY: ${trip.name.toUpperCase()}\n`;
     if (trip.startDate && trip.endDate) {
-      report += `📅 Date: ${new Date(trip.startDate).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })} - ${new Date(trip.endDate).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}\n`;
+      report += `📅 Date: ${fmt(trip.startDate)} - ${fmt(trip.endDate)}\n`;
     }
-    report += `💰 Total Trip Expense: ${totalTripExpense.toFixed(2)} ${trip.currency}\n`;
+    report += `💰 Total Trip Expense: ${totalTripExpense.toFixed(2)} ${cur}\n`;
     report += `👥 Members: ${trip.members.length}\n`;
     report += `-------------------------------------------\n\n`;
 
     report += `📊 CONTRIBUTIONS:\n`;
-    trip.members.forEach(m => {
+    trip.members.forEach((m) => {
       const spent = m.expenses.reduce((sum, e) => sum + e.amount, 0);
-      report += `  - ${m.name}: ${spent.toFixed(2)} ${trip.currency}\n`;
+      report += `  - ${m.name}: ${spent.toFixed(2)} ${cur}\n`;
     });
     report += `\n`;
 
     report += `💸 FINAL SETTLEMENTS (WHO PAYS WHOM):\n`;
     if (settlements.length > 0) {
-      settlements.forEach(s => {
-        report += `  ✅ ${s.from} pays ${s.to} ➜ ${s.amount.toFixed(2)} ${trip.currency}\n`;
+      settlements.forEach((x) => {
+        report += `  ✅ ${x.from} pays ${x.to} ➜ ${x.amount.toFixed(2)} ${cur}\n`;
       });
     } else {
       report += `  ✨ Everything is perfectly balanced! No payments needed.\n`;
     }
     report += `\nShared via TripSplit 🚀`;
 
-    navigator.clipboard.writeText(report);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 3000);
+    const done = () => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 3000);
+    };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(report).then(done, () => window.prompt('Copy the summary', report));
+    } else {
+      window.prompt('Copy the summary', report);
+    }
   };
 
-  return (
-    <div className="max-w-3xl mx-auto py-10 px-4 space-y-8 print:py-4">
-      {/* ── HEADER HERO ────────────────────────────────────────── */}
-      <div className="relative overflow-hidden rounded-3xl bg-linear-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-8 md:p-10 shadow-xl border border-slate-800 text-center">
-        <div className="absolute inset-0 pointer-events-none overflow-hidden">
-          <div className="absolute top-[-30%] right-[-10%] w-[350px] h-[350px] bg-indigo-500/10 rounded-full blur-[80px]" />
-          <div className="absolute bottom-[-30%] left-[-10%] w-[300px] h-[300px] bg-teal-400/10 rounded-full blur-[80px]" />
-        </div>
+  const maxSpent = Math.max(...trip.members.map((m) => m.expenses.reduce((s, e) => s + e.amount, 0)), 1);
 
-        <div className="relative z-10 flex flex-col items-center text-center space-y-4">
-          {/* Status Pill */}
-          <div className="flex-shrink-0">
-            <select
-              value={trip.status}
-              onChange={(e) => handleStatusChange(e.target.value)}
-              disabled={statusUpdating}
-              className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest border outline-none cursor-pointer transition-all appearance-none text-center ${
-                trip.status === 'active' 
-                  ? 'bg-teal-500/10 text-teal-300 border-teal-500/30 hover:bg-teal-500/25' 
-                  : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25'
-              }`}
-              style={{ colorScheme: 'dark' }}
-            >
-              <option value="active" className="bg-slate-900 text-white">🌴 Active</option>
-              <option value="completed" className="bg-slate-900 text-white">✅ Completed</option>
-            </select>
-          </div>
+  const tabs = [
+    ['settlements', 'Settle up'],
+    ['ledger', `Expenses (${allExpenses.length})`],
+    ['stats', 'Per member'],
+  ] as const;
 
-          {/* Trip Info */}
-          <div className="space-y-1 max-w-xl">
-            <h1 className="text-3xl md:text-5xl font-black tracking-tight uppercase leading-tight">
-              {trip.name}
-            </h1>
-            <p className="text-slate-300 font-bold text-xs uppercase tracking-wider">
-              {trip.startDate ? new Date(trip.startDate).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
-              {trip.endDate ? ` — ${new Date(trip.endDate).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}
-            </p>
-          </div>
+  const wide = layout === 'page';
+  const memberCount = `${trip.members.length} ${trip.members.length === 1 ? 'member' : 'members'}`;
 
-          <div className="w-16 h-0.5 bg-indigo-500/30 rounded" />
+  const checkIcon = (
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 7.5l3 3 6-7" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+  );
 
-          {/* Stats Grid */}
-          <div className="flex flex-row items-center justify-center gap-8 md:gap-12 flex-wrap pt-2 w-full">
-            <div className="text-center">
-              <p className="text-[10px] uppercase font-black tracking-widest text-slate-400">Total Trip Expense</p>
-              <p className="text-3xl md:text-5xl font-black text-indigo-400 tracking-tight mt-1">
-                {totalTripExpense.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-sm md:text-base font-bold text-white">{trip.currency}</span>
-              </p>
-            </div>
-            <div className="w-[1px] h-8 bg-slate-800 hidden sm:block" />
-            <div className="text-center">
-              <p className="text-[10px] uppercase font-black tracking-widest text-slate-400">Avg per Member</p>
-              <p className="text-2xl md:text-3xl font-black text-teal-400 tracking-tight mt-1">
-                {averagePerFamily.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-xs md:text-sm font-bold text-slate-300">{trip.currency}</span>
-              </p>
-            </div>
-          </div>
-        </div>
+  /* Trip card: dates, status, totals and the owner's trip actions. */
+  const tripCard = (
+    <section
+      aria-label="Trip details"
+      className="rounded-[20px] bg-navy text-white px-4 py-4 sm:px-5 print:bg-white print:text-navy print:border print:border-line"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm text-[#d7e2ec] print:text-ink-2">{cardDate || memberCount}</span>
+        <StatusBadge status={isActive ? 'active' : 'completed'} onDark />
       </div>
+      <p className="mt-3 text-[0.8125rem] text-[#bfe9e5] print:text-ink-2">Total spent</p>
+      <p className="font-display text-[1.75rem] sm:text-[2rem] font-extrabold leading-[1.1] break-words">{money(totalTripExpense)}</p>
+      <p className="mt-0.5 text-sm text-[#d7e2ec] print:text-ink-2">
+        {money(perMember)} per member{dateLabel ? ` · ${memberCount}` : ''}
+      </p>
 
-      {/* ── TABS NAVIGATION ───────────────────────────────────── */}
-      <div className="bg-white rounded-2xl p-1.5 border border-slate-200/80 shadow-xs flex gap-1 print:hidden">
-        <button
-          onClick={() => setActiveTab('settlements')}
-          className={`flex-1 py-3 text-xs font-bold rounded-xl transition-all ${
-            activeTab === 'settlements'
-              ? 'bg-indigo-600 text-white shadow-md'
-              : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
-          }`}
-        >
-          💸 Settle Balances
-        </button>
-        <button
-          onClick={() => setActiveTab('ledger')}
-          className={`flex-1 py-3 text-xs font-bold rounded-xl transition-all ${
-            activeTab === 'ledger'
-              ? 'bg-indigo-600 text-white shadow-md'
-              : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
-          }`}
-        >
-          📝 Expense Ledger ({allExpenses.length})
-        </button>
-        <button
-          onClick={() => setActiveTab('stats')}
-          className={`flex-1 py-3 text-xs font-bold rounded-xl transition-all ${
-            activeTab === 'stats'
-              ? 'bg-indigo-600 text-white shadow-md'
-              : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
-          }`}
-        >
-          📊 Stats & Share
-        </button>
-      </div>
-
-      {/* ── TAB CONTENT: SETTLEMENTS ───────────────────────────── */}
-      {activeTab === 'settlements' && (
-        <div className="space-y-6">
-          <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-4">
-            <div className="flex items-center justify-between mb-2">
-              <div>
-                <h2 className="text-lg font-black text-slate-800 tracking-tight">Final Payments</h2>
-                <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-0.5">Most efficient path to settle all debts</p>
-              </div>
-              <span className="text-[10px] font-black uppercase bg-emerald-50 text-emerald-600 border border-emerald-100 px-2.5 py-1 rounded-full">
-                Auto-calculated
-              </span>
-            </div>
-
-            <div className="space-y-4">
-              {settlements.length > 0 ? (
-                settlements.map((s, i) => (
-                  <div key={i} className="flex items-center justify-between p-4 rounded-2xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 hover:border-slate-200 transition-all">
-                    {/* Debtor */}
-                    <div className="flex items-center gap-3 w-1/3">
-                      <div className="w-8 h-8 rounded-full bg-red-50 text-red-600 border border-red-100/30 flex items-center justify-center text-xs font-black uppercase">
-                        {s.from.charAt(0)}
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="text-[9px] font-bold text-red-500 uppercase tracking-wider">Debtor</span>
-                        <span className="font-extrabold text-slate-800 text-sm md:text-base">{s.from}</span>
-                      </div>
-                    </div>
-
-                    {/* Transfer Direction */}
-                    <div className="flex flex-col items-center justify-center w-1/3 px-2">
-                      <span className="text-slate-400 font-bold text-xs">pays</span>
-                      <div className="w-full relative flex items-center justify-center my-1.5">
-                        <div className="absolute w-full h-[2px] bg-dashed bg-slate-200" />
-                        <span className="relative z-10 w-6 h-6 rounded-full bg-indigo-50 text-indigo-600 border border-indigo-100 flex items-center justify-center text-xs leading-none">
-                          ➔
-                        </span>
-                      </div>
-                      <span className="font-mono font-black text-emerald-700 bg-emerald-50 border border-emerald-100/50 px-3 py-1 rounded-full text-xs md:text-sm">
-                        {s.amount.toFixed(2)} {trip.currency}
-                      </span>
-                    </div>
-
-                    {/* Creditor */}
-                    <div className="flex items-center gap-3 w-1/3 justify-end text-right">
-                      <div className="flex flex-col">
-                        <span className="text-[9px] font-bold text-emerald-500 uppercase tracking-wider">Recipient</span>
-                        <span className="font-extrabold text-slate-800 text-sm md:text-base">{s.to}</span>
-                      </div>
-                      <div className="w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100/30 flex items-center justify-center text-xs font-black uppercase">
-                        {s.to.charAt(0)}
-                      </div>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="text-center py-10 space-y-3">
-                  <span className="text-3xl">✨</span>
-                  <p className="text-slate-500 font-bold text-sm">Everything is perfectly balanced!</p>
-                  <p className="text-xs text-slate-400 max-w-xs mx-auto">No transactions are necessary; contributions are completely equal.</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── TAB CONTENT: EXPENSE LEDGER ────────────────────────── */}
-      {activeTab === 'ledger' && (
-        <div className="space-y-4">
-          <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-4">
-            <div>
-              <h2 className="text-lg font-black text-slate-800 tracking-tight">Trip Ledger</h2>
-              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-0.5">Chronological record of all expenses paid</p>
-            </div>
-
-            <div className="divide-y divide-slate-100">
-              {allExpenses.length > 0 ? (
-                allExpenses.map((exp, i) => (
-                  <div key={exp.id} className="py-4 first:pt-0 last:pb-0 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-black text-slate-800 text-sm md:text-base">{exp.description}</span>
-                        <span className="text-[9px] font-bold bg-slate-100 text-slate-500 border border-slate-200/50 px-2 py-0.5 rounded">
-                          {exp.date.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}
-                        </span>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
-                        <span className="font-bold text-slate-500">Paid by:</span>
-                        <span className="font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded uppercase text-[10px]">{exp.paidBy}</span>
-                        <span className="text-slate-300">•</span>
-                        <span className="font-bold text-slate-500">Shared with:</span>
-                        <span className="font-bold text-slate-600">{exp.sharedWith.join(', ')}</span>
-                      </div>
-                    </div>
-
-                    <div className="text-right flex items-center md:flex-col gap-2 md:gap-0.5 justify-between">
-                      <span className="text-base font-black text-slate-800">
-                        {exp.amount.toFixed(2)} {trip.currency}
-                      </span>
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                        ({(exp.amount / exp.sharedWith.length).toFixed(2)} each)
-                      </span>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className="text-center text-slate-400 italic py-6">No expenses logged for this trip.</p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── TAB CONTENT: STATS & CONTRIBUTIONS ──────────────────── */}
-      {activeTab === 'stats' && (
-        <div className="space-y-6">
-          {/* Member Wise Contributions */}
-          <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-6">
-            <div>
-              <h2 className="text-lg font-black text-slate-800 tracking-tight">Member Contributions</h2>
-              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-0.5">Summary of contributions and net outcomes</p>
-            </div>
-
-            <div className="space-y-6">
-              {trip.members.map(m => {
-                const spent = m.expenses.reduce((sum, e) => sum + e.amount, 0);
-                const balance = balances[m.id];
-                const isCreditor = balance >= 0;
-                
-                // Percent contribution relative to maximum spent by anyone
-                const maxSpent = Math.max(...trip.members.map(memb => memb.expenses.reduce((s, ex) => s + ex.amount, 0)), 1);
-                const percent = (spent / maxSpent) * 100;
-
-                return (
-                  <div key={m.id} className="space-y-2">
-                    <div className="flex justify-between items-center text-sm">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-6 h-6 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center text-[10px] font-black text-indigo-600 uppercase">
-                          {m.name.charAt(0)}
-                        </div>
-                        <span className="font-extrabold text-slate-700">{m.name}</span>
-                      </div>
-                      <div className="text-right">
-                        <span className="font-black text-slate-800">{spent.toFixed(2)} {trip.currency}</span>
-                      </div>
-                    </div>
-
-                    {/* Progress Bar */}
-                    <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-linear-to-r from-indigo-500 to-indigo-600 rounded-full transition-all duration-1000"
-                        style={{ width: `${percent}%` }}
-                      />
-                    </div>
-
-                    {/* Net Balance Tag */}
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="text-slate-400 font-medium">
-                        Share: {(spent - balance).toFixed(2)} {trip.currency}
-                      </span>
-                      <span className={`font-bold px-2 py-0.5 rounded-md ${
-                        isCreditor
-                          ? 'bg-emerald-50 text-emerald-600 border border-emerald-100/50'
-                          : 'bg-red-50 text-red-600 border border-red-100/50'
-                      }`}>
-                        {isCreditor ? '+' : ''}{balance.toFixed(2)} {trip.currency}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-
-          </div>
-        </div>
-      )}
-
-      {/* ── ACTION BUTTONS ─────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 print:hidden">
-        <button
-          onClick={handleCopySummary}
-          className={`py-4 rounded-2xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md ${
-            copied
-              ? 'bg-emerald-600 text-white shadow-emerald-100'
-              : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-100 hover:-translate-y-0.5'
-          }`}
-        >
-          {copied ? (
+      {isOwner && wide && (
+        <div className={`no-print mt-4 flex gap-2 ${isActive ? 'lg:flex-col' : ''}`}>
+          {isActive ? (
             <>
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
-              </svg>
-              Summary Copied!
+              <button
+                type="button"
+                onClick={() => setDialog('complete')}
+                className="flex-1 lg:flex-none inline-flex items-center justify-center gap-2 h-11 lg:h-10 px-4 rounded-full bg-peach text-navy text-[0.9375rem] lg:text-sm font-bold hover:bg-sunset transition-colors"
+              >
+                {checkIcon}
+                Mark trip as completed
+              </button>
+              {editHref && (
+                <Link
+                  href={editHref}
+                  aria-label="Edit expenses"
+                  className="inline-flex items-center justify-center h-11 lg:h-10 px-4 rounded-full border border-white/35 text-white text-[0.9375rem] lg:text-sm font-semibold hover:bg-white/10 transition-colors"
+                >
+                  <span className="lg:hidden">Edit</span>
+                  <span className="hidden lg:inline">Edit expenses</span>
+                </Link>
+              )}
             </>
           ) : (
+            <button
+              type="button"
+              onClick={() => setDialog('reopen')}
+              className="flex-1 inline-flex items-center justify-center h-11 lg:h-10 px-4 rounded-full border border-white/35 text-white text-[0.9375rem] lg:text-sm font-semibold hover:bg-white/10 transition-colors"
+            >
+              Reopen trip
+            </button>
+          )}
+        </div>
+      )}
+    </section>
+  );
+
+  return (
+    <div className={`${wide ? 'max-w-2xl lg:max-w-6xl mx-auto px-4 sm:px-6 pt-5 pb-8' : ''} space-y-4 print:py-0`}>
+      {wide ? (
+        <div className="flex flex-col sm:flex-row sm:items-center gap-x-2.5 gap-y-0.5 min-w-0">
+          {isOwner && (
             <>
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-              </svg>
-              Copy Summary (WhatsApp)
+              <Link href="/dashboard" className="no-print inline-flex items-center gap-1 text-sm font-semibold text-teal hover:text-teal-2 shrink-0">
+                <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M8.5 3L4.5 7l4 4" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                My trips
+              </Link>
+              <span aria-hidden="true" className="no-print hidden sm:inline text-line-2">/</span>
             </>
           )}
-        </button>
+          <h1 className="font-display text-[1.625rem] sm:text-[1.75rem] font-extrabold leading-tight tracking-[-0.01em] text-navy [overflow-wrap:anywhere]">
+            {trip.name}
+          </h1>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <p className="hidden print:block font-display text-[1.75rem] font-extrabold text-navy">{trip.name}</p>
+          <h2 className="font-display text-2xl font-extrabold tracking-tight text-navy">Group settlement</h2>
+          {tripCard}
+        </div>
+      )}
 
-        {trip.status !== 'completed' && (
-          <button
-            onClick={() => router.push(`/wizard/${trip.id}/sharing`)}
-            className="bg-white border border-slate-200/80 hover:border-slate-300 text-slate-700 py-4 rounded-2xl font-black text-xs uppercase tracking-wider hover:bg-slate-50 transition-all flex items-center justify-center gap-2 cursor-pointer"
+      {!isActive && (
+        <p className="no-print rounded-[20px] border border-line bg-white px-5 py-3.5 text-[0.9375rem] text-ink-2">
+          <strong className="text-navy">This trip is completed.</strong> Expenses are locked and the settlement below is final.
+        </p>
+      )}
+
+      {actionError && (
+        <p role="alert" className="text-[0.9375rem] font-semibold text-danger bg-red-50 border border-red-200 rounded-2xl px-4 py-3">
+          {actionError}
+        </p>
+      )}
+
+      <div className={`grid gap-4 lg:gap-5 ${wide ? 'lg:grid-cols-[minmax(0,1fr)_300px] lg:grid-rows-[auto_1fr] lg:items-start' : ''}`}>
+        {wide && <div className="lg:col-start-2 lg:row-start-1">{tripCard}</div>}
+        <div className={`space-y-4 min-w-0 ${wide ? 'lg:col-start-1 lg:row-start-1 lg:row-span-2' : ''}`}>
+          <div role="tablist" aria-label="Trip summary" className="no-print flex gap-1 p-1 rounded-full bg-white border border-line">
+            {tabs.map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === key}
+                onClick={() => setActiveTab(key)}
+                className={`flex-1 h-10 px-2 rounded-full text-[0.9375rem] font-bold transition-colors ${
+                  activeTab === key ? 'bg-peach text-navy' : 'text-ink-2 hover:text-navy'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* All three sections are always rendered; only the active one shows on screen,
+              and printing includes every section so the PDF is the full trip record. */}
+          <div className={activeTab === 'settlements' ? 'print:break-inside-avoid' : 'hidden print:block print:break-inside-avoid'}>
+            <h2 className="hidden print:block font-display text-lg font-bold text-navy mb-2">Who pays whom</h2>
+            <section className={`${ui.card} overflow-hidden`} aria-label="Payments to settle up">
+              {settlements.length > 0 ? (
+                <ul className="divide-y divide-line">
+                  {settlements.map((x, i) => (
+                    <li key={i} className="px-3 sm:px-6 py-4">
+                      <div className={`grid items-center gap-2 ${wide ? 'grid-cols-[minmax(0,1fr)_5.75rem_minmax(0,1fr)] sm:grid-cols-[minmax(0,1fr)_11rem_minmax(0,1fr)] sm:gap-5' : 'grid-cols-[minmax(0,1fr)_5.75rem_minmax(0,1fr)]'}`}>
+                        <div className="flex items-center justify-end gap-3 min-w-0 text-right">
+                          <span className={`font-semibold text-navy text-[0.9375rem] [overflow-wrap:anywhere] min-w-0 ${wide ? 'sm:text-lg' : ''}`}>{x.from}</span>
+                          {wide && <span className="hidden sm:inline-flex"><Avatar name={x.from} tone="sunset" size="lg" /></span>}
+                        </div>
+                        <div className="flex flex-col items-center">
+                          <span className={`font-display font-bold text-navy whitespace-nowrap text-[0.9375rem] ${wide ? 'sm:text-xl' : ''}`}>
+                            {formatMoney(x.amount)}
+                            {wide && <span className="hidden sm:inline"> {cur}</span>}
+                          </span>
+                          <span aria-hidden="true" className="flex items-center w-full text-teal my-0.5">
+                            <span className="h-0.5 flex-1 bg-current rounded-full" />
+                            <svg width="12" height="12" viewBox="0 0 12 12" className="-ml-1"><path d="M2 1.5l5 4.5-5 4.5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                          </span>
+                          <span className="sr-only">{`${x.from} pays ${x.to}`}</span>
+                          <span aria-hidden="true" className="text-xs sm:text-sm text-ink-2">
+                            <span className={wide ? 'sm:hidden' : ''}>{cur}</span>
+                            {wide && <span className="hidden sm:inline">pays</span>}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 min-w-0">
+                          {wide && <span className="hidden sm:inline-flex"><Avatar name={x.to} tone="teal" size="lg" /></span>}
+                          <span className={`font-semibold text-navy text-[0.9375rem] [overflow-wrap:anywhere] min-w-0 ${wide ? 'sm:text-lg' : ''}`}>{x.to}</span>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="px-5 py-10 text-center">
+                  <p className="font-display text-lg font-bold text-navy">Everyone is already even.</p>
+                  <p className="text-[0.9375rem] text-ink-2 mt-1">
+                    {allExpenses.length ? 'No payments are needed.' : 'Add expenses to see who owes whom.'}
+                  </p>
+                </div>
+              )}
+            </section>
+          </div>
+
+          <div className={activeTab === 'ledger' ? 'print:mt-6' : 'hidden print:block print:mt-6'}>
+            <h2 className="hidden print:block font-display text-lg font-bold text-navy mb-2">All expenses ({allExpenses.length})</h2>
+            <section className={`${ui.card} overflow-hidden`} aria-label="All expenses">
+              {allExpenses.length > 0 ? (
+                <ul className="divide-y divide-line">
+                  {allExpenses.map((exp) => (
+                    <li key={exp.id} className="px-4 sm:px-6 py-3.5 flex items-start justify-between gap-4 break-inside-avoid">
+                      <div className="min-w-0">
+                        <p className="text-navy text-[0.9375rem] sm:text-base break-words">
+                          {exp.description ? (
+                            <>
+                              <span className="font-semibold">{exp.description}</span>
+                              <span className="text-ink-2">, paid by {exp.paidBy}</span>
+                            </>
+                          ) : (
+                            <span className="font-semibold">Paid by {exp.paidBy}</span>
+                          )}
+                        </p>
+                        <p className="text-sm text-ink-2 mt-0.5 break-words">
+                          <span suppressHydrationWarning>
+                            {exp.date.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}
+                          </span>
+                          {`, shared by ${exp.sharedWith.length === trip.members.length && trip.members.length > 1 ? 'all members' : exp.sharedWith.join(', ')}`}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="font-display font-bold text-navy whitespace-nowrap text-[1.0625rem]">{money(exp.amount)}</p>
+                        {exp.sharedWith.length > 1 && (
+                          <p className="text-sm text-ink-2 whitespace-nowrap">{formatMoney(exp.amount / exp.sharedWith.length)} each</p>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="px-5 py-10 text-center text-[0.9375rem] text-ink-2">No expenses yet.</p>
+              )}
+            </section>
+          </div>
+
+          <div className={activeTab === 'stats' ? 'print:mt-6 print:break-inside-avoid' : 'hidden print:block print:mt-6 print:break-inside-avoid'}>
+            <h2 className="hidden print:block font-display text-lg font-bold text-navy mb-2">Per member</h2>
+            <section className={`${ui.card} overflow-hidden`} aria-label="Per member">
+              <ul className="divide-y divide-line">
+                {trip.members.map((m) => {
+                  const spent = m.expenses.reduce((sum, e) => sum + e.amount, 0);
+                  const balance = balances[m.id] ?? 0;
+                  const share = spent - balance;
+                  const even = Math.abs(balance) < 0.005;
+                  return (
+                    <li key={m.id} className="px-4 sm:px-6 py-3.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <Avatar name={m.name} size="sm" />
+                          <span className="font-semibold text-navy truncate">{m.name}</span>
+                        </div>
+                        <span
+                          className={`text-sm font-bold whitespace-nowrap px-3 py-1 rounded-full ${
+                            even ? 'bg-sky text-ink-2' : balance > 0 ? 'bg-teal-soft text-teal-2' : 'bg-sunset-soft text-sunset-ink'
+                          }`}
+                        >
+                          {even ? 'Even' : balance > 0 ? `Gets back ${money(balance)}` : `Owes ${money(-balance)}`}
+                        </span>
+                      </div>
+                      <div className="mt-2.5 h-2 rounded-full bg-sky overflow-hidden" aria-hidden="true">
+                        <div className="h-full rounded-full bg-teal-mid" style={{ width: `${(spent / maxSpent) * 100}%` }} />
+                      </div>
+                      <p className="mt-1.5 text-sm text-ink-2">
+                        Paid {money(spent)}, share of costs {money(share)}
+                      </p>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          </div>
+
+          {footer && <div className="no-print">{footer}</div>}
+        </div>
+
+        {/* Share and other actions */}
+        <aside className={`no-print ${wide ? 'lg:col-start-2 lg:row-start-2' : ''}`}>
+          <div className={`${ui.card} p-4 flex flex-col gap-2.5 ${wide ? '' : 'sm:flex-row sm:flex-wrap'}`}>
+            {wide && <p className="font-display font-bold text-navy px-1">Share the result</p>}
+            <button type="button" onClick={handleCopySummary} className={`${ui.btnPrimary} ${copied ? 'bg-teal-2' : ''}`}>
+              {copied ? 'Summary copied' : 'Copy summary for WhatsApp'}
+            </button>
+            <button type="button" onClick={() => window.print()} className={ui.btnSecondary}>
+              Print or save PDF
+            </button>
+            {isOwner && (
+              <button type="button" onClick={() => setDialog('delete')} className={ui.btnDangerGhost}>
+                Delete trip
+              </button>
+            )}
+          </div>
+        </aside>
+      </div>
+
+      {isOwner && (
+        <>
+          <ConfirmDialog
+            open={dialog === 'complete'}
+            title="Mark this trip as completed?"
+            confirmLabel="Mark as completed"
+            cancelLabel="Not yet"
+            busy={busy}
+            onCancel={() => setDialog(null)}
+            onConfirm={() => changeStatus('completed')}
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-5M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-            </svg>
-            Edit Expenses / Add New
-          </button>
-        )}
-      </div>
-
-      <div className="text-center print:hidden flex flex-col items-center gap-4 mt-8">
-        <button
-          onClick={() => window.print()}
-          className="text-xs font-bold text-slate-400 hover:text-slate-600 transition-colors uppercase tracking-wider"
-        >
-          🖨️ Print Report / Save PDF
-        </button>
-        <button
-          onClick={handleDeleteTrip}
-          disabled={isDeleting}
-          className="text-xs font-bold text-red-400 hover:text-red-600 transition-colors uppercase tracking-wider"
-        >
-          🗑️ {isDeleting ? 'Deleting...' : 'Delete Trip'}
-        </button>
-      </div>
+            <p>
+              Once it&apos;s completed, <strong>no one can add or edit expenses</strong> on this trip, including members
+              using their links.
+            </p>
+            <p>The trip stays available for viewing the final settlement, and moves to your Completed trips.</p>
+          </ConfirmDialog>
+          <ConfirmDialog
+            open={dialog === 'reopen'}
+            title="Reopen this trip?"
+            confirmLabel="Reopen trip"
+            busy={busy}
+            onCancel={() => setDialog(null)}
+            onConfirm={() => changeStatus('active')}
+          >
+            <p>Expenses become editable again, by you and by members with a link. The settlement may change.</p>
+          </ConfirmDialog>
+          <ConfirmDialog
+            open={dialog === 'delete'}
+            title="Delete this trip?"
+            confirmLabel="Delete trip"
+            tone="danger"
+            busy={busy}
+            onCancel={() => setDialog(null)}
+            onConfirm={handleDeleteTrip}
+          >
+            <p>
+              <strong>{trip.name}</strong> and all its expenses will be permanently deleted, and every member link will
+              stop working. This can&apos;t be undone.
+            </p>
+          </ConfirmDialog>
+        </>
+      )}
     </div>
   );
 }

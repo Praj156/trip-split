@@ -1,23 +1,18 @@
-// lib/db.ts
-import { Pool } from 'pg'
-import { PrismaPg } from '@prisma/adapter-pg'
-import { PrismaClient } from '@prisma/client'
+import { Pool } from 'pg';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaClient } from '@prisma/client';
 
-const connectionString = process.env.DATABASE_URL
+const createClient = () => {
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  return new PrismaClient({
+    adapter: new PrismaPg(pool),
+    log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
+  });
+};
 
-const pool = new Pool({ connectionString })
-const adapter = new PrismaPg(pool)
+const globalForPrisma = globalThis as unknown as { prisma?: ReturnType<typeof createClient> };
 
-const prismaClientSingleton = () => {
-  return new PrismaClient({ adapter })
-}
-
-type PrismaClientSingleton = ReturnType<typeof prismaClientSingleton>
-
-const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClientSingleton | undefined
-}
-
-export const db = globalForPrisma.prisma ?? prismaClientSingleton()
-
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
+// Reuse one client across hot reloads in development and across warm
+// invocations in production.
+export const db = globalForPrisma.prisma ?? createClient();
+globalForPrisma.prisma = db;

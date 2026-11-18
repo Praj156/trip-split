@@ -1,45 +1,38 @@
-import { db } from '@/lib/db';
 import { notFound } from 'next/navigation';
+import { getOwnedTrip } from '@/lib/access';
+import { loadSerializedTrip } from '@/lib/trip-data';
+import SharePanel from '@/app/components/SharePanel';
 import SummaryView from './SummaryView';
+
+export const metadata = { title: 'Settlement' };
 
 export default async function SummaryPage({ params }: { params: Promise<{ tripId: string }> }) {
   const { tripId } = await params;
-  
-  const trip = await db.trip.findUnique({
-    where: { id: tripId },
-    include: {
-      members: {
-        include: {
-          expenses: {
-            orderBy: { createdAt: 'asc' }
-          }
-        }
-      }
-    }
-  });
+  if (!(await getOwnedTrip(tripId))) notFound();
 
+  const trip = await loadSerializedTrip(tripId);
   if (!trip) notFound();
 
-  // Safely serialize Prisma Date objects to plain JSON strings for the Client Component
-  const serializedTrip = {
-    id: trip.id,
-    name: trip.name,
-    status: trip.status,
-    currency: trip.currency,
-    startDate: trip.startDate ? trip.startDate.toISOString() : null,
-    endDate: trip.endDate ? trip.endDate.toISOString() : null,
-    members: trip.members.map(m => ({
-      id: m.id,
-      name: m.name,
-      expenses: m.expenses.map(e => ({
-        id: e.id,
-        description: e.description || '',
-        amount: e.amount,
-        sharedWithIds: e.sharedWithIds || [],
-        date: e.date.toISOString(),
-      }))
-    }))
-  };
-
-  return <SummaryView trip={serializedTrip} />;
+  return (
+    <SummaryView
+      trip={trip}
+      viewer="owner"
+      editHref={`/wizard/${trip.id}/sharing`}
+      footer={
+        trip.status === 'active' ? (
+          <SharePanel
+            tripId={trip.id}
+            tripName={trip.name}
+            currency={trip.currency}
+            stats={Object.fromEntries(
+              trip.members.map((m) => [
+                m.id,
+                { count: m.expenses.length, total: m.expenses.reduce((t, e) => t + e.amount, 0) },
+              ]),
+            )}
+          />
+        ) : undefined
+      }
+    />
+  );
 }

@@ -1,162 +1,169 @@
 'use server';
 
+import { revalidatePath } from 'next/cache';
 import { db } from '@/lib/db';
-import { getCurrentUser } from '@/lib/auth';
+import { checkUser } from '@/lib/auth';
+import { requireOwnedTrip } from '@/lib/access';
+import { cleanText, hasLetterOrDigit, isCurrency, isDateInRange, LIMITS, parseDateInput } from '@/lib/validation';
 
-export async function createTripWithMembers({
-  name,
-  startDate,
-  endDate,
-  currency,
-  memberNames,
-}: {
+// Server actions return errors instead of throwing, because Next.js hides
+// thrown error messages from the browser in production builds.
+export type ActionResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string };
+
+interface TripInput {
   name: string;
   startDate: string;
   endDate: string;
   currency: string;
   memberNames: string[];
-}): Promise<string> {
-  const user = await getCurrentUser();
-  if (!user) throw new Error('Unauthorized');
+}
 
-  const dbUser = await db.user.findUnique({ where: { id: user.id } });
-  if (!dbUser) throw new Error('User not found in database');
+function validateTrip(input: TripInput) {
+  const name = cleanText(input.name, LIMITS.tripName);
+  if (!name || !hasLetterOrDigit(name)) return { error: 'Give the trip a name with at least one letter or number.' } as const;
+
+  const endInput = input.endDate || input.startDate;
+  if (!isDateInRange(input.startDate) || !isDateInRange(endInput)) {
+    return { error: 'Choose real trip dates between the years 2000 and 2100.' } as const;
+  }
+  const start = parseDateInput(input.startDate);
+  const end = parseDateInput(endInput);
+  if (!start || !end) return { error: 'Choose valid trip dates.' } as const;
+  if (end < start) return { error: 'End date must be on or after the start date.' } as const;
+
+  if (!isCurrency(input.currency)) return { error: 'Choose a supported currency.' } as const;
+
+  const names: string[] = [];
+  for (const raw of input.memberNames ?? []) {
+    const n = cleanText(raw, LIMITS.memberName);
+    if (n && !hasLetterOrDigit(n)) return { error: `“${n}” isn’t a valid member name. Use at least one letter or number.` } as const;
+    if (n && !names.some((x) => x.toLowerCase() === n.toLowerCase())) names.push(n);
+  }
+  if (names.length < 2) return { error: 'Add at least 2 members.' } as const;
+  if (names.length > LIMITS.members) return { error: `A trip can have up to ${LIMITS.members} members.` } as const;
+
+  return { value: { name, start, end, currency: input.currency, names } } as const;
+}
+
+export async function createTripWithMembers(input: TripInput): Promise<ActionResult<string>> {
+  const user = await checkUser();
+  if (!user) return { ok: false, error: 'Your session has expired. Sign in again.' };
+
+  const v = validateTrip(input);
+  if ('error' in v) return { ok: false, error: v.error! };
 
   const trip = await db.trip.create({
     data: {
-      name,
-      currency,
-      startDate: new Date(startDate),
-      endDate: new Date(endDate),
+      name: v.value.name,
+      currency: v.value.currency,
+      startDate: v.value.start,
+      endDate: v.value.end,
       userId: user.id,
-      members: {
-        create: memberNames.map(memberName => ({ name: memberName })),
-      },
+      // Staggered timestamps keep members in the order they were entered.
+      members: { create: v.value.names.map((name, i) => ({ name, createdAt: new Date(Date.now() + i) })) },
     },
   });
 
-  return trip.id;
+  revalidatePath('/dashboard');
+  return { ok: true, data: trip.id };
 }
 
-export async function updateTripStatus(tripId: string, status: string) {
-  const user = await getCurrentUser();
-  if (!user) throw new Error('Unauthorized');
+export async function updateTripWithMembers(
+  input: TripInput & { tripId: string },
+): Promise<ActionResult> {
+  let trip;
+  try {
+    trip = await requireOwnedTrip(input.tripId);
+  } catch {
+    return { ok: false, error: 'Trip not found.' };
+  }
 
-  await db.trip.update({
-    where: { id: tripId, userId: user.id },
-    data: { status },
-  });
-}
+  if (trip.status !== 'active') {
+    return { ok: false, error: 'This trip is completed. Reopen it before making changes.' };
+  }
 
-export async function deleteTrip(tripId: string) {
-  const user = await getCurrentUser();
-  if (!user) throw new Error('Unauthorized');
+  const v = validateTrip(input);
+  if ('error' in v) return { ok: false, error: v.error! };
 
-  await db.trip.delete({
-    where: { id: tripId, userId: user.id },
-  });
-}
+  const members = await db.member.findMany({ where: { tripId: trip.id } });
+  const wanted = v.value.names.map((n) => n.toLowerCase());
+  const existing = members.map((m) => m.name.toLowerCase());
 
-export async function updateTripDetails(tripId: string, data: { name: string; startDate: string; endDate: string; currency: string }) {
-  const user = await getCurrentUser();
-  if (!user) throw new Error('Unauthorized');
+  const toRemove = members.filter((m) => !wanted.includes(m.name.toLowerCase()));
+  const toAdd = v.value.names.filter((n) => !existing.includes(n.toLowerCase()));
 
-  await db.trip.update({
-    where: { id: tripId, userId: user.id },
-    data: {
-      name: data.name,
-      startDate: new Date(data.startDate),
-      endDate: new Date(data.endDate),
-      currency: data.currency,
-    },
-  });
-}
-
-export async function createTrip(formData: FormData) {
-  const user = await getCurrentUser();
-  if (!user) throw new Error('Unauthorized');
-
-  const dbUser = await db.user.findUnique({ where: { id: user.id } });
-  if (!dbUser) throw new Error('User not found');
-
-  const trip = await db.trip.create({
-    data: {
-      name: formData.get('name') as string,
-      startDate: new Date(formData.get('startDate') as string),
-      endDate: new Date(formData.get('endDate') as string),
-      userId: user.id,
-    },
-  });
-
-  return trip.id;
-}
-
-export async function updateTripWithMembers({
-  tripId,
-  name,
-  startDate,
-  endDate,
-  currency,
-  memberNames,
-}: {
-  tripId: string;
-  name: string;
-  startDate: string;
-  endDate: string;
-  currency: string;
-  memberNames: string[];
-}) {
-  const user = await getCurrentUser();
-  if (!user) throw new Error('Unauthorized');
-
-  const trip = await db.trip.findUnique({
-    where: { id: tripId, userId: user.id },
-    include: { members: true },
-  });
-  if (!trip) throw new Error('Trip not found');
-
-  const existingNames = trip.members.map((m: any) => m.name.toLowerCase());
-  const newNamesLowerCase = memberNames.map((n: string) => n.toLowerCase());
-  
-  // Find members to remove (case insensitive)
-  const membersToRemove = trip.members.filter((m: any) => !newNamesLowerCase.includes(m.name.toLowerCase()));
-  
-  // Find members to add (names that don't match existing)
-  const namesToAdd = memberNames.filter((n: string) => !existingNames.includes(n.toLowerCase()));
-
-  if (membersToRemove.length > 0) {
-    const membersWithExpenses = await db.member.findMany({
-      where: {
-        id: { in: membersToRemove.map((m: any) => m.id) },
-        expenses: { some: {} }
-      }
+  if (toRemove.length > 0) {
+    const payers = await db.member.findMany({
+      where: { id: { in: toRemove.map((m) => m.id) }, expenses: { some: {} } },
+      select: { name: true },
     });
-    if (membersWithExpenses.length > 0) {
-      throw new Error(`Cannot remove members with expenses logged.`);
+    if (payers.length > 0) {
+      return {
+        ok: false,
+        error: `${payers.map((p) => p.name).join(', ')} paid for expenses on this trip. Delete those expenses before removing them.`,
+      };
     }
   }
 
-  await db.$transaction(async (tx: any) => {
+  const removedIds = new Set(toRemove.map((m) => m.id));
+
+  await db.$transaction(async (tx) => {
     await tx.trip.update({
-      where: { id: tripId },
+      where: { id: trip.id },
       data: {
-        name,
-        startDate: new Date(startDate),
-        endDate: new Date(endDate),
-        currency,
-      }
+        name: v.value.name,
+        startDate: v.value.start,
+        endDate: v.value.end,
+        currency: v.value.currency,
+      },
     });
 
-    if (membersToRemove.length > 0) {
-      await tx.member.deleteMany({
-        where: { id: { in: membersToRemove.map((m: any) => m.id) } }
+    if (removedIds.size > 0) {
+      // Take removed members out of every split they were part of, so their
+      // share is spread over the remaining people instead of vanishing.
+      const affected = await tx.expense.findMany({
+        where: { tripId: trip.id, sharedWithIds: { hasSome: [...removedIds] } },
       });
+      for (const e of affected) {
+        const remaining = e.sharedWithIds.filter((id) => !removedIds.has(id));
+        await tx.expense.update({
+          where: { id: e.id },
+          data: { sharedWithIds: remaining.length > 0 ? remaining : [e.paidById] },
+        });
+      }
+      await tx.member.deleteMany({ where: { id: { in: [...removedIds] }, tripId: trip.id } });
     }
 
-    if (namesToAdd.length > 0) {
-      await tx.member.createMany({
-        data: namesToAdd.map((n: string) => ({ name: n, tripId }))
-      });
+    if (toAdd.length > 0) {
+      await tx.member.createMany({ data: toAdd.map((name, i) => ({ name, tripId: trip.id, createdAt: new Date(Date.now() + i) })) });
     }
   });
+
+  revalidatePath(`/wizard/${trip.id}`, 'layout');
+  revalidatePath('/dashboard');
+  return { ok: true, data: undefined };
+}
+
+export async function updateTripStatus(tripId: string, status: string): Promise<ActionResult> {
+  if (status !== 'active' && status !== 'completed') return { ok: false, error: 'Unknown status.' };
+  try {
+    const trip = await requireOwnedTrip(tripId);
+    await db.trip.update({ where: { id: trip.id }, data: { status } });
+  } catch {
+    return { ok: false, error: 'Trip not found.' };
+  }
+  revalidatePath(`/wizard/${tripId}`, 'layout');
+  revalidatePath('/dashboard');
+  return { ok: true, data: undefined };
+}
+
+export async function deleteTrip(tripId: string): Promise<ActionResult> {
+  try {
+    const trip = await requireOwnedTrip(tripId);
+    await db.trip.delete({ where: { id: trip.id } });
+  } catch {
+    return { ok: false, error: 'Trip not found.' };
+  }
+  revalidatePath('/dashboard');
+  return { ok: true, data: undefined };
 }

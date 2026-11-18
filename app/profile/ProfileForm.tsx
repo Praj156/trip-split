@@ -1,110 +1,89 @@
 'use client';
 
 import { useState } from 'react';
-import { updateProfile } from '../actions/user';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { updateProfile } from '../actions/user';
+import { CURRENCIES } from '@/lib/validation';
+import { ui } from '@/app/components/ui';
 
 export default function ProfileForm({ initialData }: { initialData: { name: string; defaultCurrency: string; email: string } }) {
   const [name, setName] = useState(initialData.name);
   const [currency, setCurrency] = useState(initialData.defaultCurrency);
-  const [profileLoading, setProfileLoading] = useState(false);
-  const [profileMessage, setProfileMessage] = useState('');
-  const [profileError, setProfileError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
   const router = useRouter();
 
-  const handleProfileSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setProfileLoading(true);
-    setProfileError('');
-    setProfileMessage('');
-
+    setSaving(true);
+    setError('');
+    setMessage('');
     try {
-      await updateProfile({ name, defaultCurrency: currency });
-      setProfileMessage('Profile updated successfully.');
-      router.refresh();
-    } catch (err) {
-      setProfileError('Failed to update profile.');
+      const res = await updateProfile({ name, defaultCurrency: currency });
+      if (!res.ok) setError(res.error);
+      else {
+        setMessage('Profile saved.');
+        router.refresh();
+      }
+    } catch {
+      setError('Could not save your profile. Try again.');
     } finally {
-      setProfileLoading(false);
+      setSaving(false);
     }
   };
 
   return (
-    <div className="space-y-6">
-      {/* General Settings */}
-      <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs p-6 space-y-6">
-        <h2 className="text-sm font-black uppercase tracking-widest text-slate-400">General Settings</h2>
-        
-        <form onSubmit={handleProfileSubmit} className="space-y-4">
-          <div className="space-y-1.5">
-            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500">Email (Read Only)</label>
+    <div className="space-y-4">
+      <form onSubmit={handleSubmit} className={`${ui.card} p-4 sm:p-5 space-y-4`} aria-labelledby="general-heading">
+        <h2 id="general-heading" className={ui.sectionTitle}>Account</h2>
+        <div>
+          <label htmlFor="profile-email" className={ui.label}>Email</label>
+          <input id="profile-email" type="email" disabled value={initialData.email} className={ui.input} />
+          <p className={ui.hint}>Your sign-in email can&apos;t be changed here.</p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label htmlFor="profile-name" className={ui.label}>Your name</label>
             <input
-              type="email"
-              disabled
-              value={initialData.email}
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold text-slate-500 cursor-not-allowed"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500">Your Name</label>
-            <input
+              id="profile-name"
               type="text"
+              maxLength={60}
               value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. John Doe"
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 placeholder-slate-400 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 transition-all"
+              onChange={(e) => { setName(e.target.value); setError(''); setMessage(''); }}
+              placeholder="e.g. Priya Sharma"
+              className={ui.input}
             />
           </div>
-
-          <div className="space-y-1.5">
-            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500">Default Currency</label>
-            <select
-              value={currency}
-              onChange={(e) => setCurrency(e.target.value)}
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 bg-white outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 transition-all appearance-none"
-            >
-              <option value="AED">AED (Emirati Dirham)</option>
-              <option value="USD">USD (US Dollar)</option>
-              <option value="EUR">EUR (Euro)</option>
-              <option value="GBP">GBP (British Pound)</option>
-              <option value="INR">INR (Indian Rupee)</option>
-              <option value="AUD">AUD (Australian Dollar)</option>
-              <option value="CAD">CAD (Canadian Dollar)</option>
+          <div>
+            <label htmlFor="profile-currency" className={ui.label}>Default currency</label>
+            <select id="profile-currency" value={currency} onChange={(e) => { setCurrency(e.target.value); setError(''); setMessage(''); }} className={ui.input}>
+              {CURRENCIES.map((c) => (
+                <option key={c.code} value={c.code}>{c.code} ({c.label})</option>
+              ))}
             </select>
           </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <button type="submit" disabled={saving} className={ui.btnPrimary}>
+            {saving ? 'Saving…' : 'Save changes'}
+          </button>
+          <p aria-live="polite" className={`text-sm font-semibold ${error ? 'text-danger' : 'text-teal'}`}>
+            {error || message}
+          </p>
+        </div>
+      </form>
 
-          {profileError && <p className="text-xs font-semibold text-red-500">{profileError}</p>}
-          {profileMessage && <p className="text-xs font-semibold text-green-600">{profileMessage}</p>}
-
-          <div className="pt-2">
-            <button
-              type="submit"
-              disabled={profileLoading}
-              className="px-6 py-3 rounded-xl bg-indigo-600 text-white text-xs font-black uppercase tracking-wider hover:bg-indigo-700 disabled:opacity-50 transition-all"
-            >
-              {profileLoading ? 'Saving...' : 'Save Changes'}
-            </button>
-          </div>
-        </form>
-      </div>
-
-      {/* Security Settings Card */}
-      <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs p-6 space-y-4">
+      <section className={`${ui.card} p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3`} aria-labelledby="security-heading">
         <div>
-          <h2 className="text-sm font-black uppercase tracking-widest text-slate-400">Security</h2>
-          <p className="text-xs text-slate-400 font-bold mt-1">Manage your password and authentication settings.</p>
+          <h2 id="security-heading" className={ui.sectionTitle}>Password</h2>
+          <p className="text-sm text-ink-2">Change the password you use to sign in.</p>
         </div>
-        <div className="pt-2">
-          <Link
-            href="/profile/update-password"
-            className="inline-flex items-center justify-center px-5 py-3 rounded-xl border border-slate-200 text-xs font-black uppercase tracking-wider text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-all"
-          >
-            🔑 Change Password
-          </Link>
-        </div>
-      </div>
+        <Link href="/profile/update-password" className={ui.btnSecondary}>
+          Change password
+        </Link>
+      </section>
     </div>
   );
 }

@@ -1,51 +1,26 @@
 'use server';
 
-import { getCurrentUser } from '@/lib/auth';
+import { revalidatePath } from 'next/cache';
+import { checkUser, getCurrentUser } from '@/lib/auth';
 import { db } from '@/lib/db';
-
-export async function checkUser() {
-  const user = await getCurrentUser();
-
-  if (!user) return null;
-
-  const loggedInUser = await db.user.findUnique({
-    where: { id: user.id },
-  });
-
-  if (loggedInUser) return loggedInUser;
-
-  const newUser = await db.user.create({
-    data: {
-      id: user.id,
-      email: user.email || '',
-    },
-  });
-
-  return newUser;
-}
-
-export async function checkEmailExists(email: string) {
-  const user = await db.user.findUnique({
-    where: { email },
-  });
-  return !!user;
-}
+import { cleanText, hasLetterOrDigit, isCurrency } from '@/lib/validation';
+import type { ActionResult } from './trip';
 
 export async function getUserProfile() {
-  const user = await getCurrentUser();
-  if (!user) return null;
-  return db.user.findUnique({ where: { id: user.id } });
+  return checkUser();
 }
 
-export async function updateProfile(data: { name: string; defaultCurrency: string }) {
+export async function updateProfile(data: { name: string; defaultCurrency: string }): Promise<ActionResult> {
   const user = await getCurrentUser();
-  if (!user) throw new Error('Unauthorized');
+  if (!user) return { ok: false, error: 'Your session has expired. Sign in again.' };
+  if (!isCurrency(data.defaultCurrency)) return { ok: false, error: 'Choose a supported currency.' };
+  const name = cleanText(data.name, 60);
+  if (name && !hasLetterOrDigit(name)) return { ok: false, error: 'Your name needs at least one letter.' };
 
-  return db.user.update({
+  await db.user.update({
     where: { id: user.id },
-    data: {
-      name: data.name,
-      defaultCurrency: data.defaultCurrency,
-    },
+    data: { name: name || null, defaultCurrency: data.defaultCurrency },
   });
+  revalidatePath('/profile');
+  return { ok: true, data: undefined };
 }
