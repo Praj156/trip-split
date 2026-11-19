@@ -34,7 +34,7 @@ export default async function MemberPage({ params }: { params: Promise<{ token: 
       </header>
 
       <main className="grow">
-        <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 sm:px-6 pt-5 pb-8 grid gap-8 lg:grid-cols-2 lg:gap-8 items-start">
+        <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 sm:px-6 pt-5 pb-8 grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-8 items-start">
           <div className="space-y-4 min-w-0 no-print">
             <div className="relative overflow-hidden rounded-[24px] bg-navy text-white px-5 sm:px-7 py-6">
               <p className="text-[0.9375rem] text-[#bfe9e5] break-words">{trip.name}</p>

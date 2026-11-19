@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { updateTripStatus, deleteTrip } from '@/app/actions/trip';
 import Link from 'next/link';
-import { computeBalances, computeSettlements, effectiveSharers, formatMoney } from '@/lib/settlement';
+import { computeBalances, computeSettlements, effectiveSharers, formatMoney, wholeBalances } from '@/lib/settlement';
 import { Avatar, StatusBadge, ui } from '@/app/components/ui';
 import { ConfirmDialog } from '@/app/components/ConfirmDialog';
 
@@ -86,11 +86,12 @@ export default function SummaryView({
 
   // Totals, balances and the transfers that settle them (see lib/settlement.ts)
   const totalTripExpense = trip.members.reduce((acc, m) => acc + m.expenses.reduce((sum, e) => sum + e.amount, 0), 0);
-  const perMember = totalTripExpense / (trip.members.length || 1);
+  const perMember = Math.round(totalTripExpense / (trip.members.length || 1));
   const flatExpenses = trip.members.flatMap((m) =>
     m.expenses.map((e) => ({ amount: e.amount, paidById: m.id, sharedWithIds: e.sharedWithIds })),
   );
-  const balances = computeBalances(trip.members, flatExpenses);
+  // Whole-number balances: payments are whole amounts and still add up exactly.
+  const balances = wholeBalances(computeBalances(trip.members, flatExpenses));
   const settlements = computeSettlements(trip.members, balances);
   const memberIds = new Set(trip.members.map((m) => m.id));
 
@@ -102,12 +103,49 @@ export default function SummaryView({
         amount: e.amount,
         paidBy: m.name,
         date: new Date(e.date),
-        sharedWith: effectiveSharers({ amount: e.amount, paidById: m.id, sharedWithIds: e.sharedWithIds }, memberIds).map(
-          (id) => trip.members.find((member) => member.id === id)?.name ?? 'Unknown',
-        ),
+        sharedWithIds: effectiveSharers({ amount: e.amount, paidById: m.id, sharedWithIds: e.sharedWithIds }, memberIds),
       })),
     )
     .sort((a, b) => b.date.getTime() - a.date.getTime());
+
+  // What each member's part of the costs comes to; matches the Per member tab.
+  const spentBy = (id: string) => trip.members.find((m) => m.id === id)?.expenses.reduce((sum, e) => sum + e.amount, 0) ?? 0;
+  const shareOf = (id: string) => Math.round(spentBy(id) - (balances[id] ?? 0));
+
+  // Short column headings for the expenses grid ("The Sharmas" → "Sharmas"),
+  // lengthened until no two members share one.
+  const shortLabel = (() => {
+    const base = trip.members.map((m) => m.name.trim().replace(/^the\s+/i, '') || m.name.trim());
+    const labels: Record<string, string> = {};
+    let len = 7;
+    const make = (n: number) => base.map((b) => (b.length > n ? `${b.slice(0, n - 1).trimEnd()}…` : b));
+    let out = make(len);
+    while (new Set(out).size < out.length && len < 40) out = make(++len);
+    const seen: Record<string, number> = {};
+    out = out.map((l) => (seen[l] = (seen[l] ?? 0) + 1) > 1 ? `${l} ${seen[l]}` : l);
+    trip.members.forEach((m, i) => (labels[m.id] = out[i]));
+    return labels;
+  })();
+  // In print the grid shrinks to fit the page instead of scrolling.
+  // The grid needs roughly: name (8rem) + amount (6.5rem) + 3.75rem per member + a little slack.
+  // Where the box is narrower than that (phones, very big trips), the chip list is shown
+  // instead, so nothing scrolls sideways. Printouts always use the grid.
+  const gridMinRem = 15 + 3.75 * trip.members.length;
+  const layoutCss = `.exp-grid{display:none}@container expenses (min-width:${gridMinRem}rem){.exp-grid{display:block}.exp-cards{display:none}}@media print{.exp-grid{display:block!important}.exp-cards{display:none!important}}`;
+  const withoutThe = (name: string) => name.trim().replace(/^the\s+/i, '') || name;
+  const sharedChips = (ids: string[]) => {
+    const n = trip.members.length;
+    if (ids.length === n && n > 1) return { kind: 'everyone' as const };
+    if (n <= 6) return { kind: 'all' as const };
+    const out = trip.members.filter((m) => !ids.includes(m.id));
+    if (out.length <= 2) return { kind: 'except' as const, out };
+    return { kind: 'sharers' as const };
+  };
+  const tickIcon = (
+    <svg width="10" height="10" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7.5l2.5 2.5L11 4.5" stroke="currentColor" strokeWidth="2.4" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+  );
+  const stickyName = 'sticky left-0 z-10 w-32 min-w-32 pl-4 sm:pl-6 pr-2 print:static print:w-auto print:min-w-0 print:pl-3';
+  const stickyAmount = 'sticky left-32 z-10 w-[6.5rem] min-w-[6.5rem] px-2 sm:pr-4 whitespace-nowrap shadow-[1px_0_0_#dde5ee] print:static print:w-auto print:min-w-0 print:shadow-none';
 
   const fmt = (iso: string) =>
     new Date(iso).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
@@ -134,21 +172,21 @@ export default function SummaryView({
     if (trip.startDate && trip.endDate) {
       report += `📅 Date: ${fmt(trip.startDate)} - ${fmt(trip.endDate)}\n`;
     }
-    report += `💰 Total Trip Expense: ${totalTripExpense.toFixed(2)} ${cur}\n`;
+    report += `💰 Total Trip Expense: ${money(totalTripExpense)}\n`;
     report += `👥 Members: ${trip.members.length}\n`;
     report += `-------------------------------------------\n\n`;
 
     report += `📊 CONTRIBUTIONS:\n`;
     trip.members.forEach((m) => {
       const spent = m.expenses.reduce((sum, e) => sum + e.amount, 0);
-      report += `  - ${m.name}: ${spent.toFixed(2)} ${cur}\n`;
+      report += `  - ${m.name}: ${money(spent)}\n`;
     });
     report += `\n`;
 
     report += `💸 FINAL SETTLEMENTS (WHO PAYS WHOM):\n`;
     if (settlements.length > 0) {
       settlements.forEach((x) => {
-        report += `  ✅ ${x.from} pays ${x.to} ➜ ${x.amount.toFixed(2)} ${cur}\n`;
+        report += `  ✅ ${x.from} pays ${x.to} ➜ ${money(x.amount)}\n`;
       });
     } else {
       report += `  ✨ Everything is perfectly balanced! No payments needed.\n`;
@@ -271,7 +309,7 @@ export default function SummaryView({
         </p>
       )}
 
-      <div className={`grid gap-4 lg:gap-5 ${wide ? 'lg:grid-cols-[minmax(0,1fr)_300px] lg:grid-rows-[auto_1fr] lg:items-start' : ''}`}>
+      <div className={`grid grid-cols-[minmax(0,1fr)] gap-4 lg:gap-5 ${wide ? 'lg:grid-cols-[minmax(0,1fr)_300px] lg:grid-rows-[auto_1fr] lg:items-start' : ''}`}>
         {wide && <div className="lg:col-start-2 lg:row-start-1">{tripCard}</div>}
         <div className={`space-y-4 min-w-0 ${wide ? 'lg:col-start-1 lg:row-start-1 lg:row-span-2' : ''}`}>
           <div role="tablist" aria-label="Trip summary" className="no-print flex gap-1 p-1 rounded-full bg-white border border-line">
@@ -341,38 +379,146 @@ export default function SummaryView({
 
           <div className={activeTab === 'ledger' ? 'print:mt-6' : 'hidden print:block print:mt-6'}>
             <h2 className="hidden print:block font-display text-lg font-bold text-navy mb-2">All expenses ({allExpenses.length})</h2>
-            <section className={`${ui.card} overflow-hidden`} aria-label="All expenses">
+            <section className={`${ui.card} overflow-hidden [container-type:inline-size] [container-name:expenses]`} aria-label="All expenses">
               {allExpenses.length > 0 ? (
-                <ul className="divide-y divide-line">
-                  {allExpenses.map((exp) => (
-                    <li key={exp.id} className="px-4 sm:px-6 py-3.5 flex items-start justify-between gap-4 break-inside-avoid">
-                      <div className="min-w-0">
-                        <p className="text-navy text-[0.9375rem] sm:text-base break-words">
-                          {exp.description ? (
-                            <>
-                              <span className="font-semibold">{exp.description}</span>
-                              <span className="text-ink-2">, paid by {exp.paidBy}</span>
-                            </>
-                          ) : (
-                            <span className="font-semibold">Paid by {exp.paidBy}</span>
-                          )}
-                        </p>
-                        <p className="text-sm text-ink-2 mt-0.5 break-words">
-                          <span suppressHydrationWarning>
-                            {exp.date.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}
-                          </span>
-                          {`, shared by ${exp.sharedWith.length === trip.members.length && trip.members.length > 1 ? 'all members' : exp.sharedWith.join(', ')}`}
-                        </p>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <p className="font-display font-bold text-navy whitespace-nowrap text-[1.0625rem]">{money(exp.amount)}</p>
-                        {exp.sharedWith.length > 1 && (
-                          <p className="text-sm text-ink-2 whitespace-nowrap">{formatMoney(exp.amount / exp.sharedWith.length)} each</p>
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+                <>
+                <style>{layoutCss}</style>
+                <div className="exp-grid overflow-x-auto print:overflow-visible">
+                  <table className="relative w-full border-collapse text-[0.9375rem] print:text-xs">
+                    <caption className="sr-only">Each expense, who paid it, and which members shared it</caption>
+                    <thead>
+                      <tr className="bg-sky text-left text-[0.8125rem] text-ink-2">
+                        <th scope="col" className={`${stickyName} bg-sky font-semibold py-2.5`}>Paid by</th>
+                        <th scope="col" className={`${stickyAmount} bg-sky font-semibold py-2.5 text-right`}>
+                          Amount <span className="font-normal">({cur})</span>
+                        </th>
+                        {trip.members.map((m) => (
+                          <th key={m.id} scope="col" title={m.name} className="px-1.5 py-2.5 font-semibold text-center min-w-[3.75rem] print:min-w-0 print:px-0.5">
+                            <span aria-hidden="true">{shortLabel[m.id]}</span>
+                            <span className="sr-only">{m.name}</span>
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allExpenses.map((exp) => (
+                        <tr key={exp.id} className="border-t border-line break-inside-avoid">
+                          <th scope="row" className={`${stickyName} bg-white py-3 text-left font-normal align-middle`}>
+                            <span className="block font-semibold text-navy [overflow-wrap:anywhere]">{exp.paidBy}</span>
+                            {exp.description && (
+                              <span className="block text-[0.8125rem] text-ink-2 [overflow-wrap:anywhere]">{exp.description}</span>
+                            )}
+                          </th>
+                          <td className={`${stickyAmount} bg-white py-3 text-right font-display font-bold text-navy whitespace-nowrap align-middle`}>
+                            {formatMoney(exp.amount)}
+                          </td>
+                          {trip.members.map((m) => {
+                            const shared = exp.sharedWithIds.includes(m.id);
+                            return (
+                              <td key={m.id} className="px-1.5 py-3 text-center align-middle print:px-0.5 print:py-2">
+                                {shared ? (
+                                  <span className="inline-flex w-6 h-6 rounded-md bg-teal text-white items-center justify-center print:border print:border-teal print:text-teal print:bg-white">
+                                    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7.5l2.5 2.5L11 4.5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                                    <span className="sr-only">{`Shared by ${m.name}`}</span>
+                                  </span>
+                                ) : (
+                                  <span className="inline-block w-6 h-6 rounded-md bg-sky border border-line" aria-label={`Not shared by ${m.name}`} role="img" />
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t-2 border-line bg-sky">
+                        <th scope="row" className={`${stickyName} bg-sky py-3 text-left font-semibold text-navy`}>
+                          Total
+                          <span className="block text-[0.8125rem] font-normal text-ink-2">Each member’s share</span>
+                        </th>
+                        <td className={`${stickyAmount} bg-sky py-3 text-right font-display font-extrabold text-navy whitespace-nowrap`}>
+                          {formatMoney(totalTripExpense)}
+                        </td>
+                        {trip.members.map((m) => (
+                          <td key={m.id} className="px-1.5 py-3 text-center font-semibold text-navy whitespace-nowrap text-[0.8125rem] sm:text-sm print:px-0.5 print:text-xs">
+                            {formatMoney(shareOf(m.id))}
+                          </td>
+                        ))}
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+
+                {/* Narrow screens: one card per expense with member chips. */}
+                <div className="exp-cards">
+                  <div className="flex justify-between gap-3 px-4 sm:px-6 py-2.5 bg-sky text-[0.8125rem] text-ink-2">
+                    <span>Paid by · shared with</span>
+                    <span>Amount ({cur})</span>
+                  </div>
+                  <ul className="divide-y divide-line border-t border-line">
+                    {allExpenses.map((exp) => {
+                      const how = sharedChips(exp.sharedWithIds);
+                      const names = trip.members.filter((m) => exp.sharedWithIds.includes(m.id)).map((m) => m.name);
+                      return (
+                        <li key={exp.id} className="px-4 sm:px-6 py-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="font-semibold text-navy [overflow-wrap:anywhere]">{exp.paidBy}</p>
+                              {exp.description && <p className="text-[0.8125rem] text-ink-2 [overflow-wrap:anywhere]">{exp.description}</p>}
+                            </div>
+                            <p className="font-display font-extrabold text-navy text-[1.0625rem] whitespace-nowrap">{formatMoney(exp.amount)}</p>
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-1.5" aria-label={`Shared by ${names.join(', ')}`} role="group">
+                            {how.kind === 'everyone' && (
+                              <span aria-hidden="true" className="inline-flex items-center gap-1 rounded-full bg-teal px-2.5 py-0.5 text-xs font-bold text-white">
+                                {tickIcon}Everyone ({trip.members.length})
+                              </span>
+                            )}
+                            {how.kind === 'except' && (
+                              <span aria-hidden="true" className="inline-flex items-center gap-1 rounded-full bg-teal px-2.5 py-0.5 text-xs font-bold text-white">
+                                {tickIcon}Everyone except {how.out.map((m) => withoutThe(m.name)).join(' and ')}
+                              </span>
+                            )}
+                            {(how.kind === 'all' || how.kind === 'sharers') &&
+                              trip.members
+                                .filter((m) => how.kind === 'all' || exp.sharedWithIds.includes(m.id))
+                                .map((m) =>
+                                  exp.sharedWithIds.includes(m.id) ? (
+                                    <span key={m.id} aria-hidden="true" className="inline-flex items-center gap-1 rounded-full border border-teal-mid bg-teal-soft px-2.5 py-0.5 text-xs font-semibold text-teal-2">
+                                      {tickIcon}{withoutThe(m.name)}
+                                    </span>
+                                  ) : (
+                                    <span key={m.id} aria-hidden="true" className="inline-flex rounded-full border border-[#eef2f6] bg-sky px-2.5 py-0.5 text-xs text-[#8a9bab]">
+                                      {withoutThe(m.name)}
+                                    </span>
+                                  ),
+                                )}
+                            {how.kind === 'sharers' && (
+                              <span aria-hidden="true" className="text-xs text-ink-3">
+                                {exp.sharedWithIds.length} of {trip.members.length}
+                              </span>
+                            )}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <div className="border-t-2 border-line bg-sky px-4 sm:px-6 py-3">
+                    <div className="flex items-baseline justify-between">
+                      <p className="font-semibold text-navy">Each member’s share</p>
+                      <p className="font-display font-extrabold text-navy">{formatMoney(totalTripExpense)} <span className="text-xs font-normal text-ink-2">{cur}</span></p>
+                    </div>
+                    <dl className="mt-1 grid grid-cols-2 gap-x-5">
+                      {trip.members.map((m) => (
+                        <div key={m.id} className="flex justify-between gap-2 border-b border-line/70 py-1.5 text-sm">
+                          <dt className="text-ink-2 [overflow-wrap:anywhere]">{withoutThe(m.name)}</dt>
+                          <dd className="font-bold text-navy whitespace-nowrap">{formatMoney(shareOf(m.id))}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
+                </div>
+                </>
               ) : (
                 <p className="px-5 py-10 text-center text-[0.9375rem] text-ink-2">No expenses yet.</p>
               )}
@@ -386,7 +532,7 @@ export default function SummaryView({
                 {trip.members.map((m) => {
                   const spent = m.expenses.reduce((sum, e) => sum + e.amount, 0);
                   const balance = balances[m.id] ?? 0;
-                  const share = spent - balance;
+                  const share = shareOf(m.id);
                   const even = Math.abs(balance) < 0.005;
                   return (
                     <li key={m.id} className="px-4 sm:px-6 py-3.5">

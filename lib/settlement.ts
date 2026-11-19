@@ -59,6 +59,28 @@ export function computeBalances(
 }
 
 /**
+ * Rounds balances to whole numbers so every payment is a whole amount, while
+ * keeping the total at zero (nobody's money goes missing). Each balance moves
+ * by less than 1: everyone is floored, then the leftover units go to the
+ * balances with the largest fractional parts (largest-remainder rounding).
+ */
+export function wholeBalances(balances: Record<string, number>): Record<string, number> {
+  const ids = Object.keys(balances);
+  const floors = ids.map((id) => Math.floor(balances[id] + 1e-9));
+  const target = Math.round(ids.reduce((s, id) => s + balances[id], 0));
+  let leftover = target - floors.reduce((s, f) => s + f, 0);
+  const byFraction = ids
+    .map((id, i) => ({ i, fraction: balances[id] - floors[i] }))
+    .sort((x, y) => y.fraction - x.fraction || x.i - y.i);
+
+  const out: Record<string, number> = {};
+  ids.forEach((id, i) => (out[id] = floors[i]));
+  for (let k = 0; leftover > 0 && k < byFraction.length; k++, leftover--) out[ids[byFraction[k].i]] += 1;
+  for (const id of ids) if (Object.is(out[id], -0)) out[id] = 0;
+  return out;
+}
+
+/**
  * Walks debtors and creditors in member order and pairs them off (the same
  * pairing the app has always used). Produces at most n-1 transfers.
  */
@@ -90,7 +112,10 @@ export function computeSettlements(
   return transfers;
 }
 
+/** "810" for whole amounts, "78.50" otherwise; adds the currency code when given. */
 export function formatMoney(value: number, currency?: string): string {
-  const n = value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const v = roundMoney(value);
+  const digits = Number.isInteger(v) ? 0 : 2;
+  const n = v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: 2 });
   return currency ? `${n} ${currency}` : n;
 }

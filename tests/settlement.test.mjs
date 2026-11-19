@@ -69,3 +69,46 @@ test('zero and negative amounts are ignored', () => {
   ]);
   assert.deepEqual(bal, { a: 0, b: 0, c: 0 });
 });
+
+import { wholeBalances, formatMoney } from '../lib/settlement.ts';
+
+test('whole balances stay within 1 of exact and still add up to zero', () => {
+  const exact = { r: -14.17, a: 12.5, s: 175.83, k: -174.16 };
+  const whole = wholeBalances(exact);
+  assert.equal(Object.values(whole).reduce((x, y) => x + y, 0), 0);
+  for (const id of Object.keys(exact)) {
+    assert.ok(Number.isInteger(whole[id]), `${id} is whole`);
+    assert.ok(Math.abs(whole[id] - exact[id]) < 1, `${id} moved by less than 1`);
+  }
+});
+
+test('settling whole balances gives whole payments that clear every balance', () => {
+  const four = [{ id: 'r', name: 'Rahul' }, { id: 'a', name: 'Anil' }, { id: 's', name: 'Sharmas' }, { id: 'k', name: 'Khans' }];
+  const all = ['r', 'a', 's', 'k'];
+  const exp = [
+    { amount: 150, paidById: 'r', sharedWithIds: all },
+    { amount: 100, paidById: 'r', sharedWithIds: ['r', 's'] },
+    { amount: 440, paidById: 's', sharedWithIds: ['r', 's', 'k'] },
+    { amount: 80, paidById: 'a', sharedWithIds: all },
+    { amount: 40.75, paidById: 'k', sharedWithIds: all },
+  ];
+  const whole = wholeBalances(computeBalances(four, exp));
+  const t = computeSettlements(four, whole);
+  assert.ok(t.every((x) => Number.isInteger(x.amount)), 'all payments whole');
+  const net = Object.fromEntries(all.map((id) => [id, 0]));
+  t.forEach((x) => { net[x.fromId] += x.amount; net[x.toId] -= x.amount; });
+  for (const id of all) assert.equal(net[id] + whole[id], 0, `${id} cleared`);
+});
+
+test('already-even trips need no payments after rounding', () => {
+  const bal = wholeBalances({ a: 0.004, b: -0.004 });
+  assert.deepEqual(bal, { a: 0, b: 0 });
+  assert.equal(computeSettlements(people, bal).length, 0);
+});
+
+test('money shows decimals only when needed', () => {
+  assert.equal(formatMoney(810, 'AED'), '810 AED');
+  assert.equal(formatMoney(78.5), '78.50');
+  assert.equal(formatMoney(1234.567), '1,234.57');
+  assert.equal(formatMoney(0.1 + 0.2), '0.30');
+});
